@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charis Prayer Walk - Verification Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen p-8">
+
+    <div class="max-w-4xl mx-auto space-y-8">
+
+        <!-- Header -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">Charis Prayer Walk</h1>
+                <p class="text-gray-500">Backend System Verification Dashboard</p>
+                <div class="mt-2 space-x-4">
+                    <a href="/admin.html" class="text-blue-600 hover:underline text-sm font-medium">🛡️ Admin
+                        Dashboard</a>
+                    <a href="https://github.com/christexfoundation/KharisPrayerWalk"
+                        class="text-gray-400 hover:text-gray-600 text-sm">GitHub</a>
+                </div>
+            </div>
+            <div class="text-right">
+                <span id="status-indicator"
+                    class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    System Online
+                </span>
+                <p id="socket-status" class="text-xs text-gray-400 mt-1">WebSocket: Disconnected</p>
+            </div>
+        </div>
+
+        <!-- Auth Section -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+            <h2 class="text-lg font-semibold mb-4 border-b pb-2">1. Authenticate (Create User)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="email" id="email" placeholder="Email" class="border p-2 rounded w-full"
+                    value="test@example.com">
+                <input type="password" id="password" placeholder="Password" class="border p-2 rounded w-full"
+                    value="password123">
+                <input type="text" id="name" placeholder="Name" class="border p-2 rounded w-full md:col-span-2"
+                    value="Test User">
+            </div>
+            <div class="mt-4 flex gap-2">
+                <button onclick="signup()"
+                    class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">Sign Up</button>
+                <button onclick="login()"
+                    class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-900 transition">Login</button>
+            </div>
+            <div id="auth-result" class="mt-4 p-3 bg-gray-50 rounded hidden text-sm font-mono text-gray-700 break-all">
+            </div>
+        </div>
+
+        <!-- Locations Section -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 opacity-50 pointer-events-none"
+            id="locations-section">
+            <h2 class="text-lg font-semibold mb-4 border-b pb-2">2. Discover Locations</h2>
+            <div class="flex gap-2 mb-4">
+                <button onclick="fetchLocations()"
+                    class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">Load Nearby
+                    Locations</button>
+            </div>
+            <div id="locations-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Locations will appear here -->
+            </div>
+        </div>
+
+        <!-- Walk Simulation -->
+        <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 opacity-50 pointer-events-none"
+            id="walk-section">
+            <h2 class="text-lg font-semibold mb-4 border-b pb-2">3. Simulate Prayer Walk</h2>
+            <div class="space-y-4">
+                <div class="flex gap-2">
+                    <button onclick="startWalk()"
+                        class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">Start New
+                        Walk</button>
+                    <button onclick="simulateMovement()"
+                        class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 transition">Simulate
+                        Movement (GPS)</button>
+                    <button onclick="completeWalk()"
+                        class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition">Complete
+                        Prayer</button>
+                </div>
+                <div class="bg-black text-green-400 p-4 rounded font-mono text-sm h-48 overflow-y-auto" id="walk-log">
+                    > Ready to start simulation...
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let token = null;
+        let userId = null;
+        let ws = null;
+        let activeSessionId = null;
+        let selectedLocationId = null;
+        let currentLat = 40.7128; // Default NYC
+        let currentLng = -74.0060;
+
+        const API_URL = 'http://localhost:3001';
+
+        function log(msg) {
+            const el = document.getElementById('walk-log');
+            el.innerHTML += `<div>> ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function signup() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const name = document.getElementById('name').value;
+
+            try {
+                const res = await fetch(`${API_URL}/auth/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, name })
+                });
+                const data = await res.json();
+                document.getElementById('auth-result').classList.remove('hidden');
+                document.getElementById('auth-result').innerText = JSON.stringify(data, null, 2);
+                if (data.success) alert('User created! Now Login.');
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const res = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    token = data.token;
+                    userId = data.user.id;
+                    document.getElementById('auth-result').classList.remove('hidden');
+                    document.getElementById('auth-result').innerText = 'Logged in as: ' + data.user.email;
+                    document.getElementById('auth-result').className = 'mt-4 p-3 bg-green-50 text-green-800 rounded text-sm font-mono';
+                    
+                    // Unlock UI
+                    document.getElementById('locations-section').classList.remove('opacity-50', 'pointer-events-none');
+                    document.getElementById('walk-section').classList.remove('opacity-50', 'pointer-events-none');
+                    
+                    connectWebSocket();
+                } else {
+                    alert('Login failed: ' + data.error);
+                }
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function fetchLocations() {
+            try {
+                // Fetch all active stats
+                const res = await fetch(`${API_URL}/locations`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                const container = document.getElementById('locations-list');
+                container.innerHTML = '';
+
+                if (data.locations && data.locations.length > 0) {
+                    data.locations.forEach(loc => {
+                        const div = document.createElement('div');
+                        div.className = 'border p-4 rounded hover:bg-gray-50 cursor-pointer transition';
+                        div.onclick = () => selectLocation(loc);
+                        div.innerHTML = `
+                            <h3 class="font-bold text-gray-800">${loc.name}</h3>
+                            <p class="text-sm text-gray-600">${loc.description || 'No description'}</p>
+                            <div class="mt-2 text-xs flex gap-2">
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">Dataset ID: ${loc.id.substring(0,8)}...</span>
+                                <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded">${loc.points} XP</span>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else {
+                    container.innerHTML = '<p class="text-gray-500 italic">No locations found via API. Need to seed database?</p>';
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function selectLocation(loc) {
+            selectedLocationId = loc.id;
+            // Mock coordinates near the location if it has geodata, or default
+            if (loc.location && loc.location.coordinates) {
+                currentLng = loc.location.coordinates[0];
+                currentLat = loc.location.coordinates[1];
+            }
+            log(`Selected target: ${loc.name}`);
+            alert(`Selected ${loc.name}. Ready to start walk.`);
+        }
+
+        async function startWalk() {
+            if (!selectedLocationId) {
+                alert('Please select a location above first!');
+                return;
+            }
+            log(`Starting walk session targeting location ${selectedLocationId}...`);
+            
+            try {
+                const res = await fetch(`${API_URL}/walks/start`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        locationId: selectedLocationId,
+                        latitude: currentLat - 0.01, // Start slightly away
+                        longitude: currentLng - 0.01
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    activeSessionId = data.session.id;
+                    log(`Session Started! ID: ${activeSessionId}`);
+                    log(`Monitor: User is approaching target...`);
+                } else {
+                    log(`Error starting: ${data.error}`);
+                }
+            } catch (e) { log(e.message); }
+        }
+
+        function simulateMovement() {
+            if (!activeSessionId) return alert('No active session');
+            
+            // Move closer
+            currentLat += 0.002;
+            currentLng += 0.002;
+
+            log(`GPS Update: Lat ${currentLat.toFixed(4)}, Lng ${currentLng.toFixed(4)}`);
+            
+            // Send via WebSocket
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'LOCATION_UPDATE',
+                    payload: {
+                        sessionId: activeSessionId,
+                        latitude: currentLat,
+                        longitude: currentLng
+                    }
+                }));
+                log(`> Sent WS update`);
+            }
+
+            // Check arrival API
+            checkArrival();
+        }
+
+        async function checkArrival() {
+            try {
+                const res = await fetch(`${API_URL}/walks/arrive`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sessionId: activeSessionId,
+                        locationId: selectedLocationId,
+                        latitude: currentLat,
+                        longitude: currentLng
+                    })
+                });
+                const data = await res.json();
+                if (data.withinRange) {
+                    log(`*** ARRIVED AT LOCATION! ***`);
+                    log(`Distance: ${Math.round(data.distance)}m`);
+                    log(`Prayer Content Unlocked: "${data.location.name}"`);
+                } else {
+                    log(`Approaching... Dist: ${Math.round(data.distance)}m`);
+                }
+            } catch (e) { log(e); }
+        }
+
+        async function completeWalk() {
+             try {
+                const res = await fetch(`${API_URL}/walks/complete`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sessionId: activeSessionId,
+                        locationId: selectedLocationId,
+                        latitude: currentLat,
+                        longitude: currentLng
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    log(`*** PRAYER COMPLETED! ***`);
+                    log(`Points Earned: +${data.pointsEarned}`);
+                    if (data.badgesEarned.length > 0) {
+                        log(`🏆 BADGE EARNED: ${data.badgesEarned.join(', ')}`);
+                    }
+                } else {
+                    log(`Cannot complete: ${data.error}`);
+                }
+            } catch (e) { log(e); }
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://localhost:3001/ws?token=${token}`);
+            ws.onopen = () => {
+                document.getElementById('socket-status').innerText = 'WebSocket: Connected';
+                document.getElementById('socket-status').className = 'text-xs text-green-600 mt-1 font-bold';
+            };
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'ACK') {
+                    // console.log('Server acknowledged location update');
+                }
+            };
+        }
+    </script>
+</body>
+
+</html>

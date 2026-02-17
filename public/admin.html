@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charis Admin - Integrity Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        .stat-card {
+            @apply bg-white p-6 rounded-lg shadow-sm border border-gray-100;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+    <div class="flex">
+        <!-- Sidebar -->
+        <div class="w-64 bg-indigo-900 min-h-screen text-white p-6">
+            <h1 class="text-xl font-bold mb-8">Charis Admin</h1>
+            <nav class="space-y-4 text-indigo-200">
+                <a href="#" class="block hover:text-white font-medium">Dashboard</a>
+                <a href="#" class="block hover:text-white">Live Walkers</a>
+                <a href="#" class="block hover:text-white">Fraud Alerts</a>
+                <a href="#" class="block hover:text-white">Heatmaps</a>
+                <a href="/index.html" class="block text-indigo-400 mt-20 text-sm">← Back to User Demo</a>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 p-8">
+            <header class="flex justify-between items-center mb-8">
+                <h2 class="text-2xl font-bold text-gray-800">Church Integrity Dashboard</h2>
+                <div class="flex items-center space-y-2">
+                    <span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium">System
+                        Secure</span>
+                </div>
+            </header>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="stat-card">
+                    <p class="text-gray-500 text-sm">Total Walkers</p>
+                    <h3 id="stat-users" class="text-3xl font-bold">0</h3>
+                </div>
+                <div class="stat-card">
+                    <p class="text-gray-500 text-sm">Live Sessions</p>
+                    <h3 id="stat-active" class="text-3xl font-bold text-blue-600">0</h3>
+                </div>
+                <div class="stat-card">
+                    <p class="text-gray-500 text-sm">Prayer Completions</p>
+                    <h3 id="stat-completed" class="text-3xl font-bold text-green-600">0</h3>
+                </div>
+                <div class="stat-card">
+                    <p class="text-gray-500 text-sm">Suspect Flags</p>
+                    <h3 id="stat-flags" class="text-3xl font-bold text-red-600">0</h3>
+                </div>
+            </div>
+
+            <!-- Map Section -->
+            <div class="bg-white p-6 rounded-lg shadow-sm mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-bold">Live Activity & Heatmap</h3>
+                    <div class="flex gap-2">
+                        <button onclick="loadHeatmap()"
+                            class="bg-orange-500 text-white px-3 py-1 rounded text-sm">Heatmap</button>
+                        <button onclick="loadWalkers()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Live
+                            Walkers</button>
+                    </div>
+                </div>
+                <div id="map" class="bg-gray-200"></div>
+            </div>
+
+            <!-- Flags Table -->
+            <div class="bg-white p-6 rounded-lg shadow-sm">
+                <h3 class="font-bold mb-4">Recent Fraud Alerts</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="border-b text-gray-500">
+                                <th class="pb-3">User</th>
+                                <th class="pb-3">Type</th>
+                                <th class="pb-3">Severity</th>
+                                <th class="pb-3">Description</th>
+                                <th class="pb-3">Trust Score</th>
+                                <th class="pb-3">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="flags-tbody">
+                            <!-- Rows will appear here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3001';
+        let map = L.map('map').setView([40.7128, -74.0060], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const token = 'bypass-token'; // Using bypass token as configured in backend
+
+        async function fetchStats() {
+            const res = await fetch(`${API_URL}/admin/stats`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            document.getElementById('stat-users').innerText = data.totalUsers;
+            document.getElementById('stat-active').innerText = data.activeSessions;
+            document.getElementById('stat-completed').innerText = data.completedPrayers;
+            document.getElementById('stat-flags').innerText = data.totalFlags;
+        }
+
+        async function loadFlags() {
+            const res = await fetch(`${API_URL}/admin/flags`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            const tbody = document.getElementById('flags-tbody');
+            tbody.innerHTML = '';
+
+            data.flags.forEach(f => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-red-50 transition';
+                tr.innerHTML = `
+                    <td class="py-3 font-medium">${f.user.name}</td>
+                    <td class="py-3 uppercase text-xs font-bold">${f.flagType}</td>
+                    <td class="py-3">
+                        <span class="px-2 py-0.5 rounded text-white text-xs ${f.severity === 'high' ? 'bg-red-600' : 'bg-orange-500'}">
+                            ${f.severity}
+                        </span>
+                    </td>
+                    <td class="py-3 text-gray-600">${f.description}</td>
+                    <td class="py-3 font-mono font-bold">${f.session.trustScore}%</td>
+                    <td class="py-3"><button class="text-blue-600 underline">Review</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function loadHeatmap() {
+            const res = await fetch(`${API_URL}/admin/heatmap`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+
+            // Clear markers/layers
+            map.eachLayer(l => { if (l instanceof L.HeatLayer || l instanceof L.Marker) map.removeLayer(l); });
+
+            const heatPoints = data.points.map(p => [p.lat, p.lng, p.weight]);
+            L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
+        }
+
+        async function loadWalkers() {
+            const res = await fetch(`${API_URL}/admin/active-walkers`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+
+            map.eachLayer(l => { if (l instanceof L.HeatLayer || l instanceof L.Marker) map.removeLayer(l); });
+
+            data.walkers.forEach(w => {
+                L.marker([w.location.coordinates[1], w.location.coordinates[0]])
+                    .bindPopup(`<b>${w.userName}</b><br>Trust: ${w.trustScore}%`)
+                    .addTo(map);
+            });
+        }
+
+        // Initialize
+        fetchStats();
+        loadFlags();
+        setInterval(fetchStats, 5000);
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,39 @@
+{
+    "name": "charis-prayer-walk-backend",
+    "version": "1.0.0",
+    "description": "Backend and database for Charis Prayer Walk mobile app",
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint",
+        "db:generate": "prisma generate",
+        "db:migrate": "prisma migrate dev",
+        "db:deploy": "prisma migrate deploy",
+        "db:studio": "prisma studio",
+        "db:seed": "node scripts/seed.js"
+    },
+    "dependencies": {
+        "@prisma/client": "^5.8.0",
+        "jsonwebtoken": "^9.0.2",
+        "next": "^14.1.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+    },
+    "devDependencies": {
+        "@types/jsonwebtoken": "^9.0.5",
+        "@types/node": "^20.11.0",
+        "@types/react": "^18.2.48",
+        "@types/react-dom": "^18.2.18",
+        "prisma": "^5.8.0",
+        "typescript": "^5.3.3"
+    },
+    "optionalDependencies": {
+        "twilio": "^4.20.0",
+        "africastalking": "^0.6.1"
+    },
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=9.0.0"
+    }
+}

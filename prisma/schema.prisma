@@ -1,0 +1,198 @@
+// Prisma schema for Charis Prayer Walk - Production Upgrade
+// Includes GPS Anti-Spoofing, Route Validation, and Admin Analytics
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  name         String    @db.VarChar(255)
+  role         String    @default("user") @db.VarChar(20) // "user", "admin", "pastor"
+  trustScore   Int       @default(100) @map("trust_score")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastLogin    DateTime? @map("last_login") @db.Timestamptz(6)
+  isActive     Boolean   @default(true) @map("is_active")
+
+  // Relations
+  sessions    PrayerSession[]
+  completions Completion[]
+  badges      Badge[]
+  flags       GPSFlag[]
+
+  @@index([email], map: "idx_users_email")
+  @@map("users")
+}
+
+model PrayerLocation {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @db.VarChar(255)
+  description  String?  @db.Text
+  location     String   @db.Text // GeoJSON Point
+  address      String?  @db.VarChar(500)
+  prayerText   String   @map("prayer_text") @db.Text
+  category     String?  @db.VarChar(100)
+  difficulty   String   @default("easy") @db.VarChar(20)
+  points       Int      @default(10)
+  radiusMeters Decimal  @default(50) @map("radius_meters") @db.Decimal(10, 2)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  prayers     Prayer[]
+  sessions    PrayerSession[]
+  completions Completion[]
+
+  @@index([category], map: "idx_prayer_locations_category")
+  @@index([isActive], map: "idx_prayer_locations_is_active")
+  @@map("prayer_locations")
+}
+
+model PrayerSession {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  locationId       String?   @map("location_id") @db.Uuid
+  status           String    @default("active") @db.VarChar(20) // "active", "completed", "invalid", "suspect"
+  startTime        DateTime  @default(now()) @map("start_time") @db.Timestamptz(6)
+  endTime          DateTime? @map("end_time") @db.Timestamptz(6)
+  startLocation    String?   @map("start_location") @db.Text // GeoJSON Point
+  currentLocation  String?   @map("current_location") @db.Text // GeoJSON Point
+  distanceTraveled Decimal   @default(0) @map("distance_traveled") @db.Decimal(10, 2)
+  trustScore       Int       @default(100) @map("trust_score")
+  deviceFingerprint String?  @map("device_fingerprint") @db.VarChar(255)
+  branch           String?   @db.VarChar(100)
+  participants     String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location    PrayerLocation?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  completions Completion[]
+  gpsEvents   GPSEvent[]
+  flags       GPSFlag[]
+  checkpoints RouteCheckpoint[]
+
+  @@index([userId], map: "idx_prayer_sessions_user_id")
+  @@index([locationId], map: "idx_prayer_sessions_location_id")
+  @@index([status], map: "idx_prayer_sessions_status")
+  @@map("prayer_sessions")
+}
+
+model GPSEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  timestamp   DateTime @default(now()) @db.Timestamptz(6)
+  location    String   @db.Text // GeoJSON Point
+  speed       Decimal? @db.Decimal(10, 2) // m/s
+  accuracy    Decimal? @db.Decimal(10, 2) // meters
+  altitude    Decimal? @db.Decimal(10, 2) // meters
+  isMock      Boolean  @default(false) @map("is_mock")
+
+  // Relations
+  session PrayerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "idx_gps_events_session_id")
+  @@map("gps_events")
+}
+
+model GPSFlag {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  flagType    String   @map("flag_type") @db.VarChar(50) // "teleport", "speed", "mock_gps", "vpn"
+  severity    String   @db.VarChar(20) // "low", "medium", "high"
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  session PrayerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "idx_gps_flags_session_id")
+  @@index([userId], map: "idx_gps_flags_user_id")
+  @@map("gps_flags")
+}
+
+model RouteCheckpoint {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  location    String   @db.Text // GeoJSON Point
+  order       Int
+  isReached   Boolean  @default(false) @map("is_reached")
+  reachedAt   DateTime? @map("reached_at") @db.Timestamptz(6)
+
+  // Relations
+  session PrayerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "idx_route_checkpoints_session_id")
+  @@map("route_checkpoints")
+}
+
+model Prayer {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId         String         @map("location_id") @db.Uuid
+  title              String         @db.VarChar(255)
+  content            String         @db.Text
+  scriptureReference String?        @map("scripture_reference") @db.VarChar(255)
+  durationMinutes    Int            @default(5) @map("duration_minutes")
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  location PrayerLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId], map: "idx_prayers_location_id")
+  @@map("prayers")
+}
+
+model Completion {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  locationId         String    @map("location_id") @db.Uuid
+  sessionId          String?   @map("session_id") @db.Uuid
+  completedAt        DateTime  @default(now()) @map("completed_at") @db.Timestamptz(6)
+  completionLocation String?   @map("completion_location") @db.Text // GeoJSON Point
+  distanceFromTarget Decimal?  @map("distance_from_target") @db.Decimal(10, 2)
+  pointsEarned       Int       @default(0) @map("points_earned")
+  trustScore         Int       @default(100) @map("trust_score")
+
+  // Relations
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location PrayerLocation  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  session  PrayerSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, locationId])
+  @@index([userId], map: "idx_completions_user_id")
+  @@index([locationId], map: "idx_completions_location_id")
+  @@index([completedAt], map: "idx_completions_completed_at")
+  @@map("completions")
+}
+
+model Badge {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  badgeType      String   @map("badge_type") @db.VarChar(50)
+  badgeName      String   @map("badge_name") @db.VarChar(100)
+  description    String?  @db.Text
+  iconUrl        String?  @map("icon_url") @db.VarChar(500)
+  earnedAt       DateTime @default(now()) @map("earned_at") @db.Timestamptz(6)
+  milestoneValue Int?     @map("milestone_value")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_badges_user_id")
+  @@index([badgeType], map: "idx_badges_badge_type")
+  @@map("badges")
+}

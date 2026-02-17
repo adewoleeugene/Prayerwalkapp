@@ -1,0 +1,26 @@
+node_modules
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+dist
+build
+coverage
+.vscode
+.idea
+*.log
+
+# Mobile specific
+mobile/node_modules
+mobile/.expo
+mobile/.jsc
+mobile/.npm
+mobile/*.log
+mobile/ios/Pods
+mobile/android/app/build
+mobile/android/.gradle
