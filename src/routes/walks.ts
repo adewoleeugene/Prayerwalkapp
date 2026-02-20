@@ -42,7 +42,12 @@ router.post('/start', authenticate, async (req: Request, res: Response) => {
     });
 
     if (activeSession) {
-      res.status(409).json({ error: 'Active session already exists' });
+      res.status(200).json({
+        success: true,
+        message: 'Resuming existing active session',
+        session: activeSession,
+        location: null
+      });
       return;
     }
 
@@ -205,26 +210,42 @@ router.post('/complete', authenticate, async (req: Request, res: Response) => {
 
     let pointsEarned = 50; // Default for Open Walk
     let locationName = 'Open Prayer Walk';
+    const completionLocationId = locationId || session.locationId || null;
 
-    if (locationId) {
-      const location = await prisma.prayerLocation.findUnique({ where: { id: locationId } });
+    if (completionLocationId) {
+      const location = await prisma.prayerLocation.findUnique({ where: { id: completionLocationId } });
       if (!location) return res.status(404).json({ error: 'Location invalid' });
 
       pointsEarned = location.points;
       locationName = location.name;
     }
 
-    // Record Completion
-    const completion = await prisma.completion.create({
-      data: {
-        userId,
-        locationId: locationId || undefined,
-        sessionId,
-        pointsEarned,
-        trustScore: finalScore,
-        completionLocation: JSON.stringify(JSON.parse(createPoint(latitude, longitude)))
-      }
-    });
+    if (completionLocationId) {
+      // Record Completion only when we have a concrete location
+      await prisma.completion.upsert({
+        where: {
+          userId_locationId: {
+            userId,
+            locationId: completionLocationId
+          }
+        },
+        update: {
+          sessionId,
+          pointsEarned,
+          trustScore: finalScore,
+          completionLocation: JSON.stringify(JSON.parse(createPoint(latitude, longitude))),
+          completedAt: new Date()
+        },
+        create: {
+          userId,
+          locationId: completionLocationId,
+          sessionId,
+          pointsEarned,
+          trustScore: finalScore,
+          completionLocation: JSON.stringify(JSON.parse(createPoint(latitude, longitude)))
+        }
+      });
+    }
 
     await prisma.prayerSession.update({
       where: { id: sessionId },

@@ -209,11 +209,6 @@ export default function MapScreen() {
             Alert.alert('Required', 'Please select a branch.');
             return;
         }
-        if (participants.length === 0) {
-            Alert.alert('Required', 'Please add at least one participant.');
-            return;
-        }
-
         try {
             const res = await api.walks.start(
                 targetLocation?.id,

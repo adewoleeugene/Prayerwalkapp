@@ -38,7 +38,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    const whereClause = `WHERE is_active = true`;
+    let whereClause = `WHERE is_active = true`;
     const params: any[] = [];
     if (category) {
       params.push(category);
@@ -46,7 +46,13 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     }
 
     const locations: any[] = await executeRawQuery(
-      `SELECT id, name, description, address, prayer_text, category, difficulty, points, radius_meters, ST_AsGeoJSON(location) as location 
+      `SELECT id, name, description, address, prayer_text, category, difficulty, points, radius_meters, ST_AsGeoJSON(
+          CASE
+            WHEN left(trim(location::text), 1) = '{'
+              THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+            ELSE location::geometry
+          END
+        ) as location
          FROM prayer_locations 
          ${whereClause} 
          ORDER BY created_at DESC`,
@@ -78,7 +84,13 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
     const userId = req.user!.userId;
 
     const locs: any[] = await executeRawQuery(
-      `SELECT id, name, description, address, prayer_text, category, difficulty, points, radius_meters, is_active, ST_AsGeoJSON(location) as location 
+      `SELECT id, name, description, address, prayer_text, category, difficulty, points, radius_meters, is_active, ST_AsGeoJSON(
+          CASE
+            WHEN left(trim(location::text), 1) = '{'
+              THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+            ELSE location::geometry
+          END
+        ) as location
          FROM prayer_locations WHERE id = $1::uuid`,
       [id]
     );

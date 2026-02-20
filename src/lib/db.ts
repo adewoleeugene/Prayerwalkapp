@@ -83,12 +83,20 @@ export async function findLocationsNearby(
   longitude: number,
   radiusMeters: number
 ) {
+  const locationGeomExpr = `
+    CASE
+      WHEN left(trim(location::text), 1) = '{'
+        THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+      ELSE location::geometry
+    END
+  `;
+
   return executeRawQuery(`
     SELECT 
       id,
       name,
       description,
-      ST_AsGeoJSON(location) as location,
+      ST_AsGeoJSON(${locationGeomExpr}) as location,
       address,
       prayer_text,
       category,
@@ -96,13 +104,13 @@ export async function findLocationsNearby(
       points,
       radius_meters,
       ST_Distance(
-        location::geography,
+        ${locationGeomExpr}::geography,
         ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
       ) as distance_meters
     FROM prayer_locations
     WHERE is_active = true
     AND ST_DWithin(
-      location::geography,
+      ${locationGeomExpr}::geography,
       ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
       $3
     )
@@ -116,10 +124,18 @@ export async function isWithinRange(
   userLng: number,
   locationId: string
 ): Promise<{ withinRange: boolean; distance: number; requiredRadius: number }> {
+  const locationGeomExpr = `
+    CASE
+      WHEN left(trim(location::text), 1) = '{'
+        THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+      ELSE location::geometry
+    END
+  `;
+
   const result = await executeRawQuery<any[]>(`
     SELECT 
       ST_Distance(
-        location::geography,
+        ${locationGeomExpr}::geography,
         ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
       ) as distance,
       radius_meters

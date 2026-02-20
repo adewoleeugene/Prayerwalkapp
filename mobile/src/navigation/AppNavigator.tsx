@@ -29,7 +29,7 @@ export default function AppNavigator() {
                 <Stack.Screen
                     name="Walk"
                     component={WalkScreen}
-                    options={{ headerShown: true, title: 'Prayer Walk' }}
+                    options={{ headerShown: false }}
                 />
                 <Stack.Screen
                     name="Profile"

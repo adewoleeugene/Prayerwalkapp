@@ -1,19 +1,73 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
-import { api } from '../../api/client';
+import MapView, { Marker, Polyline } from 'react-native-maps';
+import { api, getWebSocketUrl } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 
-// Use secure tunnel for WebSockets
-const WS_URL = 'wss://charis-prayer-live-v101.loca.lt/ws';
-
 export default function WalkScreen({ route }: { route: any }) {
-    const { session, targetLocation } = route.params;
+    const { session, targetLocation, fingerprint } = route.params;
     const { token } = useAuth();
     const navigation = useNavigation<any>();
     const [distance, setDistance] = useState<number | null>(null);
     const [participants, setParticipants] = useState<string[]>([]);
+    const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [routePoints, setRoutePoints] = useState<Array<{ latitude: number; longitude: number }>>([]);
+    const [distanceWalkedMeters, setDistanceWalkedMeters] = useState(0);
+    const [isCompleting, setIsCompleting] = useState(false);
+    const [walkSummary, setWalkSummary] = useState<{
+        trustScore: number;
+        pointsEarned: number;
+        durationSeconds: number;
+        distanceMeters: number;
+        routePoints: Array<{ latitude: number; longitude: number }>;
+    } | null>(null);
+
+    const formatDuration = (totalSeconds: number) => {
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
+    };
+
+    const metersToKm = (meters: number) => (meters / 1000).toFixed(2);
+
+    const calculateDistanceMeters = (
+        a: { latitude: number; longitude: number },
+        b: { latitude: number; longitude: number }
+    ) => {
+        const toRad = (deg: number) => (deg * Math.PI) / 180;
+        const R = 6371e3;
+        const dLat = toRad(b.latitude - a.latitude);
+        const dLng = toRad(b.longitude - a.longitude);
+        const lat1 = toRad(a.latitude);
+        const lat2 = toRad(b.latitude);
+        const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+        return R * c;
+    };
+
+    const getTargetCoords = () => {
+        if (!targetLocation) return null;
+
+        const coords = targetLocation.location?.coordinates || targetLocation.location;
+        if (!coords) return null;
+
+        if (Array.isArray(coords)) {
+            return { latitude: Number(coords[1]), longitude: Number(coords[0]) };
+        }
+
+        if (coords.latitude !== undefined && coords.longitude !== undefined) {
+            return { latitude: Number(coords.latitude), longitude: Number(coords.longitude) };
+        }
+
+        return null;
+    };
+
+    const targetCoords = getTargetCoords();
 
     useEffect(() => {
         if (session.participants) {
@@ -44,8 +98,17 @@ export default function WalkScreen({ route }: { route: any }) {
         };
     }, []);
 
+    useEffect(() => {
+        setElapsedSeconds(0);
+        const interval = setInterval(() => {
+            setElapsedSeconds((prev) => prev + 1);
+        }, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
     const connectWebSocket = () => {
-        ws.current = new WebSocket(`${WS_URL}?token=${token}`);
+        const wsUrl = getWebSocketUrl(token, fingerprint);
+        ws.current = new WebSocket(wsUrl);
         ws.current.onopen = () => console.log('Secure Tunnel Established');
         ws.current.onerror = (e) => console.log('WS Error', e);
     };
@@ -64,6 +127,18 @@ export default function WalkScreen({ route }: { route: any }) {
 
     const handleLocationUpdate = async (loc: Location.LocationObject) => {
         const { latitude, longitude, speed, accuracy, mockAdvertised } = loc.coords as any;
+        const nextPoint = { latitude, longitude };
+        setCurrentLocation(nextPoint);
+        setRoutePoints((prev) => {
+            if (prev.length > 0) {
+                const last = prev[prev.length - 1];
+                const increment = calculateDistanceMeters(last, nextPoint);
+                if (increment > 2) {
+                    setDistanceWalkedMeters((d) => d + increment);
+                }
+            }
+            return [...prev, nextPoint];
+        });
 
         // Anti-Cheat: Report device-level mock detection and physics
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -99,6 +174,8 @@ export default function WalkScreen({ route }: { route: any }) {
     };
 
     const handleComplete = async () => {
+        if (isCompleting) return;
+        setIsCompleting(true);
         const loc = await Location.getCurrentPositionAsync({});
         try {
             const res = await api.walks.complete(
@@ -109,22 +186,91 @@ export default function WalkScreen({ route }: { route: any }) {
             );
 
             if (res.data.success) {
-                Alert.alert('Walk Validated!', `Integrity: ${res.data.trustScore}% \nEarned: ${res.data.pointsEarned} XP`, [
-                    { text: 'Praise God', onPress: () => navigation.navigate('Map') }
-                ]);
+                if (ws.current) ws.current.close();
+                if (locationSubscription.current) locationSubscription.current.remove();
+                setWalkSummary({
+                    trustScore: Number(res.data.trustScore || 0),
+                    pointsEarned: Number(res.data.pointsEarned || 0),
+                    durationSeconds: elapsedSeconds,
+                    distanceMeters: distanceWalkedMeters,
+                    routePoints: routePoints.length > 1 ? routePoints : (currentLocation ? [currentLocation] : []),
+                });
             } else {
                 Alert.alert('Validation Error', res.data.error || 'Walk integrity too low.');
             }
         } catch (e: any) {
             Alert.alert('Error', e.response?.data?.error || 'Failed to complete walk');
+        } finally {
+            setIsCompleting(false);
         }
     };
+
+    if (walkSummary) {
+        const summaryStart = walkSummary.routePoints[0] || currentLocation;
+        return (
+            <ScrollView contentContainerStyle={styles.container}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>Walk Completed</Text>
+                    <Text style={styles.subTitle}>{session.branch || 'International'} Branch</Text>
+                </View>
+
+                {!!summaryStart && (
+                    <View style={styles.mapCard}>
+                        <MapView
+                            style={styles.map}
+                            initialRegion={{
+                                latitude: summaryStart.latitude,
+                                longitude: summaryStart.longitude,
+                                latitudeDelta: 0.01,
+                                longitudeDelta: 0.01,
+                            }}
+                        >
+                            {walkSummary.routePoints.length > 1 && (
+                                <Polyline
+                                    coordinates={walkSummary.routePoints}
+                                    strokeColor="#1971C2"
+                                    strokeWidth={5}
+                                />
+                            )}
+                            {walkSummary.routePoints[0] && (
+                                <Marker coordinate={walkSummary.routePoints[0]} title="Start" pinColor="#2F9E44" />
+                            )}
+                            {walkSummary.routePoints.length > 1 && (
+                                <Marker
+                                    coordinate={walkSummary.routePoints[walkSummary.routePoints.length - 1]}
+                                    title="End"
+                                    pinColor="#FA5252"
+                                />
+                            )}
+                        </MapView>
+                    </View>
+                )}
+
+                <View style={styles.summaryCard}>
+                    <Text style={styles.summaryLine}>Time: {formatDuration(walkSummary.durationSeconds)}</Text>
+                    <Text style={styles.summaryLine}>Distance: {metersToKm(walkSummary.distanceMeters)} km</Text>
+                    <Text style={styles.summaryLine}>Integrity: {walkSummary.trustScore}%</Text>
+                    <Text style={styles.summaryLine}>Points: {walkSummary.pointsEarned} XP</Text>
+                </View>
+
+                <TouchableOpacity
+                    style={styles.completeButton}
+                    onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Map' }] })}
+                >
+                    <Text style={styles.buttonText}>Done</Text>
+                </TouchableOpacity>
+            </ScrollView>
+        );
+    }
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
             <View style={styles.header}>
                 <Text style={styles.title}>{targetLocation?.name || 'Open Prayer Walk'}</Text>
                 <Text style={styles.subTitle}>{session.branch || 'International'} Branch</Text>
+                <View style={styles.timerBadge}>
+                    <Text style={styles.timerText}>Time: {formatDuration(elapsedSeconds)}</Text>
+                </View>
             </View>
 
             {participants.length > 0 && (
@@ -146,6 +292,42 @@ export default function WalkScreen({ route }: { route: any }) {
                 </View>
             )}
 
+            {currentLocation && (
+                <View style={styles.mapCard}>
+                    <MapView
+                        style={styles.map}
+                        initialRegion={{
+                            latitude: currentLocation.latitude,
+                            longitude: currentLocation.longitude,
+                            latitudeDelta: 0.01,
+                            longitudeDelta: 0.01,
+                        }}
+                        region={{
+                            latitude: currentLocation.latitude,
+                            longitude: currentLocation.longitude,
+                            latitudeDelta: 0.01,
+                            longitudeDelta: 0.01,
+                        }}
+                        showsUserLocation
+                    >
+                        {routePoints.length > 1 && (
+                            <Polyline
+                                coordinates={routePoints}
+                                strokeColor="#1971C2"
+                                strokeWidth={5}
+                            />
+                        )}
+                        {targetCoords && (
+                            <Marker
+                                coordinate={targetCoords}
+                                title={targetLocation?.name || 'Prayer Target'}
+                                pinColor="#FF922B"
+                            />
+                        )}
+                    </MapView>
+                </View>
+            )}
+
             {!isArrived ? (
                 <View style={styles.statusBox}>
                     <Text style={styles.status}>
@@ -160,14 +342,14 @@ export default function WalkScreen({ route }: { route: any }) {
                         </>
                     )}
 
-                    {!targetLocation && (
-                        <TouchableOpacity
-                            style={[styles.completeButton, { marginTop: 40, backgroundColor: '#FA5252' }]}
-                            onPress={handleComplete}
-                        >
-                            <Text style={styles.buttonText}>End Prayer Walk</Text>
-                        </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                        style={[styles.completeButton, { marginTop: 30, backgroundColor: '#FA5252' }]}
+                        onPress={handleComplete}
+                        disabled={isCompleting}
+                    >
+                        <Text style={styles.buttonText}>{isCompleting ? 'Ending...' : 'End Prayer Walk'}</Text>
+                    </TouchableOpacity>
+
                 </View>
             ) : (
                 <View style={styles.contentBox}>
@@ -183,11 +365,11 @@ export default function WalkScreen({ route }: { route: any }) {
                     ))}
 
                     <TouchableOpacity
-                        style={[styles.completeButton, integrity < 70 && { opacity: 0.5 }]}
+                        style={styles.completeButton}
                         onPress={handleComplete}
-                        disabled={integrity < 50}
+                        disabled={isCompleting}
                     >
-                        <Text style={styles.buttonText}>Confirm Prayer Completion</Text>
+                        <Text style={styles.buttonText}>{isCompleting ? 'Ending...' : 'Confirm Prayer Completion'}</Text>
                     </TouchableOpacity>
                     {integrity < 70 && (
                         <Text style={styles.warning}>Low integrity. Follow the path to earn rewards.</Text>
@@ -315,10 +497,47 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 20,
     },
+    timerBadge: {
+        marginTop: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: '#FFF3BF',
+        borderRadius: 14,
+    },
+    timerText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#5F3DC4',
+    },
     subTitle: {
         fontSize: 16,
         color: '#666',
         marginTop: 5,
+    },
+    mapCard: {
+        width: '100%',
+        height: 220,
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginBottom: 20,
+        backgroundColor: '#fff',
+        elevation: 2,
+    },
+    map: {
+        width: '100%',
+        height: '100%',
+    },
+    summaryCard: {
+        width: '100%',
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+    },
+    summaryLine: {
+        fontSize: 16,
+        marginBottom: 8,
+        color: '#1A1B1E',
     },
     teamContainer: {
         width: '100%',

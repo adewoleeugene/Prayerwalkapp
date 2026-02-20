@@ -8,6 +8,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { prisma, createPoint } from './lib/db';
 import { verifyToken } from './lib/auth';
+import { ensureGuestUser } from './lib/guestAuth';
 import authRoutes from './routes/auth';
 import locationRoutes from './routes/locations';
 import walkRoutes from './routes/walks';
@@ -65,10 +66,29 @@ server.on('upgrade', (request, socket, head) => {
 
   if (pathname === '/ws') {
     const token = query.token as string;
+    const fingerprint = query.fp as string | undefined;
 
     if (!token) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
+      return;
+    }
+
+    const handleBypassToken = async () => {
+      try {
+        const guestUser = await ensureGuestUser(fingerprint);
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit('connection', ws, request, guestUser.id);
+        });
+      } catch (e) {
+        console.error("WS Bypass Auth Error", e);
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+      }
+    };
+
+    if (token === 'bypass-token') {
+      void handleBypassToken();
       return;
     }
 
