@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, extractToken } from '../lib/auth';
 import { ensureGuestUser } from '../lib/guestAuth';
+import { prisma } from '../lib/db';
 
 declare global {
     namespace Express {
@@ -8,6 +9,8 @@ declare global {
             user?: {
                 userId: string;
                 email: string;
+                role: string;
+                branch: string | null;
             };
         }
     }
@@ -25,7 +28,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
             req.user = {
                 userId: guestUser.id,
-                email: guestUser.email
+                email: guestUser.email,
+                role: guestUser.role || 'user',
+                branch: guestUser.branch || null
             };
             return next();
         }
@@ -42,7 +47,28 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
             return;
         }
 
-        req.user = payload;
+        const user = await prisma.user.findUnique({
+            where: { id: payload.userId },
+            select: {
+                id: true,
+                email: true,
+                role: true,
+                branch: true,
+                isActive: true,
+            }
+        });
+
+        if (!user || !user.isActive) {
+            res.status(401).json({ error: 'Invalid or inactive account' });
+            return;
+        }
+
+        req.user = {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+            branch: user.branch,
+        };
         next();
     } catch (error) {
         console.error('Auth middleware error:', error);

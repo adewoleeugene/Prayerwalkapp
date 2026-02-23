@@ -3,10 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
 
 const DEVICE_FINGERPRINT_KEY = 'device_fingerprint';
-const DEFAULT_LAN_BASE_URL = 'http://192.168.1.195:3001';
+const DEFAULT_API_PORT = '3001';
 
 function isTunnelHost(hostname: string): boolean {
-    return hostname.endsWith('.exp.direct') || hostname.includes('exp.host');
+    return hostname.endsWith('.exp.direct') || hostname.includes('exp.host') || hostname.endsWith('.expo.dev');
 }
 
 function resolveBaseUrl() {
@@ -20,15 +20,15 @@ function resolveBaseUrl() {
         try {
             const metroHost = new URL(scriptURL).hostname;
             if (metroHost && !isTunnelHost(metroHost)) {
-                return `http://${metroHost}:3001`;
+                return `http://${metroHost}:${DEFAULT_API_PORT}`;
             }
         } catch {
-            // Fall through to platform defaults.
+            // Ignore parsing errors and fall through.
         }
     }
 
-    // Fall back to LAN backend for local development.
-    return DEFAULT_LAN_BASE_URL;
+    // Last resort for simulators/emulators running on the same machine.
+    return `http://127.0.0.1:${DEFAULT_API_PORT}`;
 }
 
 const BASE_URL = resolveBaseUrl();
@@ -77,13 +77,47 @@ export const api = {
         list: (lat: number, lng: number, radius: number) => client.get('/locations', { params: { lat, lng, radius } }),
         get: (id: string) => client.get(`/locations/${id}`),
     },
+    branches: {
+        list: (lat?: number, lng?: number, radius?: number) =>
+            client.get('/branches', {
+                params: {
+                    lat,
+                    lng,
+                    radius,
+                }
+            }),
+    },
     walks: {
-        start: (locationId: string, latitude: number, longitude: number, deviceFingerprint?: string, branch?: string, participants?: string[]) =>
-            client.post('/walks/start', { locationId, latitude, longitude, deviceFingerprint, branch, participants }),
+        start: (locationId: string, latitude: number, longitude: number, deviceFingerprint?: string, branch?: string, participants?: string[], startAddress?: string) =>
+            client.post('/walks/start', { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress }),
+        history: (
+            limit = 80,
+            options?: {
+                branch?: string;
+                days?: number;
+                walkType?: 'all' | 'path' | 'area';
+                includeActive?: boolean;
+            }
+        ) => client.get('/walks/history', {
+            params: {
+                limit,
+                branch: options?.branch,
+                days: options?.days ?? 14,
+                walkType: options?.walkType ?? 'all',
+                includeActive: options?.includeActive ?? true,
+            }
+        }),
         arrive: (sessionId: string, locationId: string, latitude: number, longitude: number) =>
             client.post('/walks/arrive', { sessionId, locationId, latitude, longitude }),
-        complete: (sessionId: string, locationId: string, latitude: number, longitude: number) =>
-            client.post('/walks/complete', { sessionId, locationId, latitude, longitude }),
+        complete: (
+            sessionId: string,
+            locationId: string,
+            latitude: number,
+            longitude: number,
+            prayerSummary?: string,
+            prayerJournal?: string
+        ) =>
+            client.post('/walks/complete', { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal }),
     },
 };
 

@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth";
 import locationRoutes from "./routes/locations";
 import walkRoutes from "./routes/walks";
 import meRoutes from "./routes/me";
+import searchRoutes from "./routes/search";
 
 export const app = express();
 
@@ -22,6 +23,7 @@ app.use("/auth", authRoutes);
 app.use("/locations", locationRoutes);
 app.use("/walks", walkRoutes);
 app.use("/me", meRoutes);
+app.use("/search", searchRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const error = err as Error;

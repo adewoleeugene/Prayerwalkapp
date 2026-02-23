@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput } from 'react-native';
 import * as Location from 'expo-location';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { api, getWebSocketUrl } from '../../api/client';
@@ -17,6 +17,9 @@ export default function WalkScreen({ route }: { route: any }) {
     const [routePoints, setRoutePoints] = useState<Array<{ latitude: number; longitude: number }>>([]);
     const [distanceWalkedMeters, setDistanceWalkedMeters] = useState(0);
     const [isCompleting, setIsCompleting] = useState(false);
+    const [isTimerRunning, setIsTimerRunning] = useState(true);
+    const [prayerSummary, setPrayerSummary] = useState('');
+    const [prayerJournal, setPrayerJournal] = useState('');
     const [walkSummary, setWalkSummary] = useState<{
         trustScore: number;
         pointsEarned: number;
@@ -87,6 +90,10 @@ export default function WalkScreen({ route }: { route: any }) {
     const ws = useRef<WebSocket | null>(null);
     const locationSubscription = useRef<Location.LocationSubscription | null>(null);
     const sessionIdRef = useRef(session.id);
+    const elapsedSecondsRef = useRef(0);
+    const routePointsRef = useRef<Array<{ latitude: number; longitude: number }>>([]);
+    const distanceWalkedMetersRef = useRef(0);
+    const currentLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
     useEffect(() => {
         startTracking();
@@ -100,11 +107,31 @@ export default function WalkScreen({ route }: { route: any }) {
 
     useEffect(() => {
         setElapsedSeconds(0);
+    }, []);
+
+    useEffect(() => {
+        if (!isTimerRunning) return;
         const interval = setInterval(() => {
             setElapsedSeconds((prev) => prev + 1);
         }, 1000);
         return () => clearInterval(interval);
-    }, []);
+    }, [isTimerRunning]);
+
+    useEffect(() => {
+        elapsedSecondsRef.current = elapsedSeconds;
+    }, [elapsedSeconds]);
+
+    useEffect(() => {
+        routePointsRef.current = routePoints;
+    }, [routePoints]);
+
+    useEffect(() => {
+        distanceWalkedMetersRef.current = distanceWalkedMeters;
+    }, [distanceWalkedMeters]);
+
+    useEffect(() => {
+        currentLocationRef.current = currentLocation;
+    }, [currentLocation]);
 
     const connectWebSocket = () => {
         const wsUrl = getWebSocketUrl(token, fingerprint);
@@ -176,13 +203,32 @@ export default function WalkScreen({ route }: { route: any }) {
     const handleComplete = async () => {
         if (isCompleting) return;
         setIsCompleting(true);
-        const loc = await Location.getCurrentPositionAsync({});
+        setIsTimerRunning(false);
+
+        let latitude = currentLocationRef.current?.latitude;
+        let longitude = currentLocationRef.current?.longitude;
+
         try {
+            const liveLoc = await Promise.race([
+                Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+            ]);
+            if (liveLoc) {
+                latitude = liveLoc.coords.latitude;
+                longitude = liveLoc.coords.longitude;
+            }
+
+            if (latitude === undefined || longitude === undefined) {
+                throw new Error('Location unavailable');
+            }
+
             const res = await api.walks.complete(
                 sessionIdRef.current,
                 targetLocation?.id,
-                loc.coords.latitude,
-                loc.coords.longitude
+                latitude,
+                longitude,
+                prayerSummary.trim() || undefined,
+                prayerJournal.trim() || undefined
             );
 
             if (res.data.success) {
@@ -191,15 +237,22 @@ export default function WalkScreen({ route }: { route: any }) {
                 setWalkSummary({
                     trustScore: Number(res.data.trustScore || 0),
                     pointsEarned: Number(res.data.pointsEarned || 0),
-                    durationSeconds: elapsedSeconds,
-                    distanceMeters: distanceWalkedMeters,
-                    routePoints: routePoints.length > 1 ? routePoints : (currentLocation ? [currentLocation] : []),
+                    durationSeconds: elapsedSecondsRef.current,
+                    distanceMeters: distanceWalkedMetersRef.current,
+                    routePoints: routePointsRef.current.length > 1
+                        ? routePointsRef.current
+                        : (currentLocationRef.current ? [currentLocationRef.current] : []),
                 });
             } else {
                 Alert.alert('Validation Error', res.data.error || 'Walk integrity too low.');
+                setIsTimerRunning(true);
             }
         } catch (e: any) {
-            Alert.alert('Error', e.response?.data?.error || 'Failed to complete walk');
+            const errorMessage = e.response?.data?.error || (e.message === 'Location unavailable'
+                ? 'Unable to get current location. Please move to an open area and try again.'
+                : 'Failed to complete walk');
+            Alert.alert('Error', errorMessage);
+            setIsTimerRunning(true);
         } finally {
             setIsCompleting(false);
         }
@@ -349,6 +402,34 @@ export default function WalkScreen({ route }: { route: any }) {
                     >
                         <Text style={styles.buttonText}>{isCompleting ? 'Ending...' : 'End Prayer Walk'}</Text>
                     </TouchableOpacity>
+                    <View style={styles.summaryInputWrap}>
+                        <Text style={styles.summaryInputLabel}>Prayer Summary (optional)</Text>
+                        <TextInput
+                            style={styles.summaryInput}
+                            placeholder="What did you pray for?"
+                            placeholderTextColor="#868E96"
+                            value={prayerSummary}
+                            onChangeText={setPrayerSummary}
+                            multiline
+                            numberOfLines={3}
+                            maxLength={600}
+                            textAlignVertical="top"
+                        />
+                    </View>
+                    <View style={styles.summaryInputWrap}>
+                        <Text style={styles.summaryInputLabel}>Prayer Walk Journal (optional)</Text>
+                        <TextInput
+                            style={[styles.summaryInput, styles.journalInput]}
+                            placeholder="Write your reflection from this prayer walk..."
+                            placeholderTextColor="#868E96"
+                            value={prayerJournal}
+                            onChangeText={setPrayerJournal}
+                            multiline
+                            numberOfLines={5}
+                            maxLength={2000}
+                            textAlignVertical="top"
+                        />
+                    </View>
 
                 </View>
             ) : (
@@ -371,6 +452,34 @@ export default function WalkScreen({ route }: { route: any }) {
                     >
                         <Text style={styles.buttonText}>{isCompleting ? 'Ending...' : 'Confirm Prayer Completion'}</Text>
                     </TouchableOpacity>
+                    <View style={styles.summaryInputWrap}>
+                        <Text style={styles.summaryInputLabel}>Prayer Summary (optional)</Text>
+                        <TextInput
+                            style={styles.summaryInput}
+                            placeholder="What did you pray for?"
+                            placeholderTextColor="#868E96"
+                            value={prayerSummary}
+                            onChangeText={setPrayerSummary}
+                            multiline
+                            numberOfLines={3}
+                            maxLength={600}
+                            textAlignVertical="top"
+                        />
+                    </View>
+                    <View style={styles.summaryInputWrap}>
+                        <Text style={styles.summaryInputLabel}>Prayer Walk Journal (optional)</Text>
+                        <TextInput
+                            style={[styles.summaryInput, styles.journalInput]}
+                            placeholder="Write your reflection from this prayer walk..."
+                            placeholderTextColor="#868E96"
+                            value={prayerJournal}
+                            onChangeText={setPrayerJournal}
+                            multiline
+                            numberOfLines={5}
+                            maxLength={2000}
+                            textAlignVertical="top"
+                        />
+                    </View>
                     {integrity < 70 && (
                         <Text style={styles.warning}>Low integrity. Follow the path to earn rewards.</Text>
                     )}
@@ -486,6 +595,29 @@ const styles = StyleSheet.create({
         color: 'white',
         fontWeight: '800',
         fontSize: 16,
+    },
+    summaryInputWrap: {
+        marginTop: 14,
+        width: '100%',
+    },
+    summaryInputLabel: {
+        fontSize: 13,
+        color: '#495057',
+        marginBottom: 6,
+        fontWeight: '600',
+    },
+    summaryInput: {
+        backgroundColor: '#F1F3F5',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#DEE2E6',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        minHeight: 88,
+        color: '#1A1B1E',
+    },
+    journalInput: {
+        minHeight: 130,
     },
     warning: {
         color: '#FA5252',

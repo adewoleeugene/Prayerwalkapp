@@ -6,7 +6,7 @@ export function authorizeRole(roles: string[]) {
             return res.status(401).json({ error: 'Authentication required' });
         }
 
-        const userRole = (req.user as any).role || 'user';
+        const userRole = req.user.role || 'user';
 
         // For bypass-token, we might want to allow it for testing, 
         // but normally role comes from DB or token.

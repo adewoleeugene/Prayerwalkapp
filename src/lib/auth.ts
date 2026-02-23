@@ -8,6 +8,8 @@ const BCRYPT_ROUNDS = 10;
 export interface JWTPayload {
     userId: string;
     email: string;
+    role: string;
+    branch: string | null;
 }
 
 // Hash password

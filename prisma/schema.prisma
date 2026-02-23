@@ -17,7 +17,8 @@ model User {
   email        String    @unique @db.VarChar(255)
   passwordHash String    @map("password_hash") @db.VarChar(255)
   name         String    @db.VarChar(255)
-  role         String    @default("user") @db.VarChar(20) // "user", "admin", "pastor"
+  role         String    @default("user") @db.VarChar(20) // "user", "admin", "superadmin"
+  branch       String?   @db.VarChar(100) // Required for "admin" users; optional for "superadmin"
   trustScore   Int       @default(100) @map("trust_score")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -73,6 +74,8 @@ model PrayerSession {
   deviceFingerprint String?  @map("device_fingerprint") @db.VarChar(255)
   branch           String?   @db.VarChar(100)
   participants     String?   @db.Text
+  prayerSummary    String?   @map("prayer_summary") @db.Text
+  prayerJournal    String?   @map("prayer_journal") @db.Text
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 

@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { requireAuth } from "../middleware/auth";
+import { authenticate } from "../middleware/authMiddleware";
 
 const router = Router();
-router.use(requireAuth);
+router.use(authenticate);
 
 router.get("/", async (req, res, next) => {
   try {
-    const userId = req.auth!.sub;
+    const userId = req.user!.userId;
 
     const [completedRows, activeWalkRows, badgesRows, distanceRows] = await Promise.all([
       prisma.$queryRaw<{ total_completed: bigint }[]>`

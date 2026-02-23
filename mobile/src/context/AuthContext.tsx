@@ -22,6 +22,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         id: '00000000-0000-0000-0000-000000000000',
         email: 'guest@charis.com',
         name: 'Guest User',
+        role: 'user',
         stats: {
             totalCompletions: 0,
             totalPoints: 0,

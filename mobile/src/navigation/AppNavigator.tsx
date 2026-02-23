@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 
 import MapScreen from '../screens/app/MapScreen';
 import WalkScreen from '../screens/app/WalkScreen';
-import ProfileScreen from '../screens/app/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -30,11 +29,6 @@ export default function AppNavigator() {
                     name="Walk"
                     component={WalkScreen}
                     options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                    name="Profile"
-                    component={ProfileScreen}
-                    options={{ headerShown: true, title: 'Your Profile' }}
                 />
             </Stack.Navigator>
         </NavigationContainer>

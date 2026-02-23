@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parse } from 'url';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -12,8 +13,10 @@ import { ensureGuestUser } from './lib/guestAuth';
 import authRoutes from './routes/auth';
 import locationRoutes from './routes/locations';
 import walkRoutes from './routes/walks';
+import branchRoutes from './routes/branches';
 import userRoutes from './routes/user';
 import adminRoutes from './routes/admin';
+import searchRoutes from './routes/search';
 import { validateGPSUpdate } from './lib/gps';
 
 dotenv.config();
@@ -24,7 +27,24 @@ const wss = new WebSocketServer({ noServer: true });
 
 // Middleware
 app.use(cors());
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.tailwindcss.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://fonts.googleapis.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https:"],
+        fontSrc: ["'self'", "https:", "data:"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+  })
+);
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.static('public'));
@@ -52,11 +72,21 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'admin-login.html'));
+});
+
+app.get('/superadmin', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'superadmin-login.html'));
+});
+
 app.use('/auth', authRoutes);
+app.use('/branches', branchRoutes);
 app.use('/locations', locationRoutes);
 app.use('/walks', walkRoutes);
 app.use('/users', userRoutes);
 app.use('/admin', adminRoutes);
+app.use('/search', searchRoutes);
 
 // WebSocket Handling
 const clients = new Map<string, WebSocket>();

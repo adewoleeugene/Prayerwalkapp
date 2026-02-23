@@ -2,179 +2,1048 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Charis Admin - Integrity Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
-    <style>
-        #map {
-            height: 500px;
-            width: 100%;
-            border-radius: 8px;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prayer Walk Admin Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #edf1f7;
+      --card: #ffffff;
+      --border: #d6dfec;
+      --text: #12284a;
+      --muted: #5f7292;
+      --primary: #1f66ff;
+      --chip: #e5ebf4;
+    }
 
-        .stat-card {
-            @apply bg-white p-6 rounded-lg shadow-sm border border-gray-100;
-        }
-    </style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    .shell {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.3fr 0.9fr;
+      max-width: 1660px;
+      margin: 0 auto;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 8px 22px rgba(24, 40, 72, 0.07);
+    }
+
+    .header {
+      grid-column: 1 / span 2;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 2rem;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .stats {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(140px, 1fr));
+      margin-left: auto;
+      justify-items: stretch;
+    }
+
+    .stat {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #f4f7fc;
+      padding: 12px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      margin-top: 6px;
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .left {
+      padding: 16px;
+    }
+
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .filter-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto auto;
+      gap: 8px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+
+    .chip {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: var(--chip);
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .chip.active {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .chip-select {
+      border: 2px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      padding: 9px 12px;
+      font-size: 1rem;
+      font-weight: 700;
+      min-width: 180px;
+    }
+
+    .chip-input {
+      border: 2px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      padding: 8px 12px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      min-width: 180px;
+      height: 42px;
+    }
+
+    #map {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      min-height: 620px;
+      width: 100%;
+      background: #f8fbff;
+    }
+
+    .legend {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .right {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      min-height: 620px;
+      position: relative;
+    }
+
+    .right h2 {
+      margin: 0;
+      font-size: 2rem;
+      line-height: 1.1;
+    }
+
+    .history-list {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: auto;
+      max-height: calc(100vh - 250px);
+      padding-right: 4px;
+    }
+
+    .history-pager {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pager-btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .pager-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .walk {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      padding: 12px;
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+
+    .walk:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 16px rgba(20, 36, 62, 0.08);
+    }
+
+    .walk-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .focus {
+      font-size: 1.08rem;
+      margin: 8px 0;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .tag {
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .tag.path {
+      color: #b42323;
+      background: #fee2e2;
+    }
+
+    .tag.area {
+      color: #1459a8;
+      background: #dbeeff;
+    }
+
+    .sheet {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #f7faff;
+      padding: 12px;
+      display: none;
+    }
+
+    .sheet.show {
+      display: block;
+      margin-top: 8px;
+      box-shadow: 0 10px 22px rgba(18, 40, 74, 0.12);
+    }
+
+    .sheet h3 {
+      margin: 0 0 6px;
+      font-size: 1.1rem;
+    }
+
+    .sheet p {
+      margin: 5px 0;
+      color: var(--muted);
+    }
+
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 10px;
+      padding: 9px 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      color: #fff;
+      background: var(--primary);
+    }
+
+    .btn.ghost {
+      color: var(--text);
+      background: #e7edf8;
+    }
+
+    .status {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+
+    .empty {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 1180px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .header {
+        grid-column: auto;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .stats {
+        width: 100%;
+      }
+
+      #map {
+        min-height: 420px;
+      }
+
+      .history-list {
+        max-height: 450px;
+      }
+
+      .filter-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 
-<body class="bg-gray-100 min-h-screen">
+<body>
+  <main class="shell">
+    <header class="panel header">
+      <div>
+        <h1 class="title">Prayer Walk Admin Dashboard</h1>
+        <p class="subtitle">Walks and people in one operational view.</p>
+      </div>
+      <div class="stats">
+        <article class="stat">
+          <div class="stat-label">Walks</div>
+          <div id="statWalks" class="stat-value">0</div>
+        </article>
+        <article class="stat">
+          <div class="stat-label">Distance</div>
+          <div id="statDistance" class="stat-value">0 km</div>
+        </article>
+      </div>
+    </header>
 
-    <div class="flex">
-        <!-- Sidebar -->
-        <div class="w-64 bg-indigo-900 min-h-screen text-white p-6">
-            <h1 class="text-xl font-bold mb-8">Charis Admin</h1>
-            <nav class="space-y-4 text-indigo-200">
-                <a href="#" class="block hover:text-white font-medium">Dashboard</a>
-                <a href="#" class="block hover:text-white">Live Walkers</a>
-                <a href="#" class="block hover:text-white">Fraud Alerts</a>
-                <a href="#" class="block hover:text-white">Heatmaps</a>
-                <a href="/index.html" class="block text-indigo-400 mt-20 text-sm">← Back to User Demo</a>
-            </nav>
+    <section class="panel left">
+      <div class="chips">
+        <button class="chip" data-days="1">Today</button>
+        <button class="chip active" data-days="7">7 days</button>
+        <button class="chip" data-days="30">30 days</button>
+      </div>
+      <div class="filter-grid">
+        <select id="branchFilter" class="chip-select" aria-label="Branch filter">
+          <option value="">Any branch</option>
+        </select>
+        <input id="startDateTime" class="chip-input" type="datetime-local" aria-label="Start date and time" />
+        <input id="endDateTime" class="chip-input" type="datetime-local" aria-label="End date and time" />
+        <button id="applyFilterBtn" class="chip">Apply</button>
+        <button id="allWalksBtn" class="chip">All Walks</button>
+      </div>
+      <div id="map"></div>
+      <p class="legend">Heavier walked paths show stronger opacity. Tap route/area for details.</p>
+      <p id="statusText" class="status"></p>
+    </section>
+
+    <section class="panel right">
+      <h2>Walk History</h2>
+      <div id="historyList" class="history-list"></div>
+      <div id="historyPager" class="history-pager"></div>
+      <p id="emptyState" class="empty" style="display:none;">No prayer walks in this filter.</p>
+
+      <article id="detailSheet" class="sheet">
+        <h3 id="detailTitle">Walk details</h3>
+        <p id="detailWho"></p>
+        <p id="detailWhen"></p>
+        <p id="detailDuration"></p>
+        <p id="detailDistance"></p>
+        <p id="detailSpeed"></p>
+        <p id="detailStartCoord"></p>
+        <p id="detailEndCoord"></p>
+        <p id="detailBranch"></p>
+        <div class="actions">
+          <button id="actionPrimary" class="btn primary">Replay</button>
+          <button id="actionSecondary" class="btn ghost">Close</button>
         </div>
+      </article>
+    </section>
+  </main>
 
-        <!-- Main Content -->
-        <div class="flex-1 p-8">
-            <header class="flex justify-between items-center mb-8">
-                <h2 class="text-2xl font-bold text-gray-800">Church Integrity Dashboard</h2>
-                <div class="flex items-center space-y-2">
-                    <span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium">System
-                        Secure</span>
-                </div>
-            </header>
+  <script>
+    const map = L.map('map', { zoomControl: true, maxZoom: 19 }).setView([8.48847, -13.26486], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
-            <!-- Stats -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="stat-card">
-                    <p class="text-gray-500 text-sm">Total Walkers</p>
-                    <h3 id="stat-users" class="text-3xl font-bold">0</h3>
-                </div>
-                <div class="stat-card">
-                    <p class="text-gray-500 text-sm">Live Sessions</p>
-                    <h3 id="stat-active" class="text-3xl font-bold text-blue-600">0</h3>
-                </div>
-                <div class="stat-card">
-                    <p class="text-gray-500 text-sm">Prayer Completions</p>
-                    <h3 id="stat-completed" class="text-3xl font-bold text-green-600">0</h3>
-                </div>
-                <div class="stat-card">
-                    <p class="text-gray-500 text-sm">Suspect Flags</p>
-                    <h3 id="stat-flags" class="text-3xl font-bold text-red-600">0</h3>
-                </div>
-            </div>
+    const layerGroup = L.layerGroup().addTo(map);
 
-            <!-- Map Section -->
-            <div class="bg-white p-6 rounded-lg shadow-sm mb-8">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-bold">Live Activity & Heatmap</h3>
-                    <div class="flex gap-2">
-                        <button onclick="loadHeatmap()"
-                            class="bg-orange-500 text-white px-3 py-1 rounded text-sm">Heatmap</button>
-                        <button onclick="loadWalkers()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Live
-                            Walkers</button>
-                    </div>
-                </div>
-                <div id="map" class="bg-gray-200"></div>
-            </div>
+    const state = {
+      days: 7,
+      rawWalks: [],
+      walks: [],
+      filterBranch: '',
+      filterStartAt: '',
+      filterEndAt: '',
+      page: 1,
+      pageSize: 5,
+      hasAutoFitted: false,
+      suppressAutoFitOnce: false,
+      closeFocusPoint: null,
+      selected: null,
+      replayTimer: null,
+      replayMarker: null,
+      layers: new Map()
+    };
 
-            <!-- Flags Table -->
-            <div class="bg-white p-6 rounded-lg shadow-sm">
-                <h3 class="font-bold mb-4">Recent Fraud Alerts</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead>
-                            <tr class="border-b text-gray-500">
-                                <th class="pb-3">User</th>
-                                <th class="pb-3">Type</th>
-                                <th class="pb-3">Severity</th>
-                                <th class="pb-3">Description</th>
-                                <th class="pb-3">Trust Score</th>
-                                <th class="pb-3">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="flags-tbody">
-                            <!-- Rows will appear here -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('token');
+    if (tokenFromQuery) {
+      localStorage.setItem('adminToken', tokenFromQuery);
+      params.delete('token');
+      const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
 
-    <script>
-        const API_URL = 'http://localhost:3001';
-        let map = L.map('map').setView([40.7128, -74.0060], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const authToken = localStorage.getItem('adminToken') || '';
+    if (!authToken) {
+      window.location.replace('/admin');
+    }
 
-        const token = 'bypass-token'; // Using bypass token as configured in backend
+    const branchFilter = document.getElementById('branchFilter');
+    const startDateTime = document.getElementById('startDateTime');
+    const endDateTime = document.getElementById('endDateTime');
+    const applyFilterBtn = document.getElementById('applyFilterBtn');
+    const allWalksBtn = document.getElementById('allWalksBtn');
+    const historyList = document.getElementById('historyList');
+    const historyPager = document.getElementById('historyPager');
+    const emptyState = document.getElementById('emptyState');
+    const statusText = document.getElementById('statusText');
 
-        async function fetchStats() {
-            const res = await fetch(`${API_URL}/admin/stats`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
-            document.getElementById('stat-users').innerText = data.totalUsers;
-            document.getElementById('stat-active').innerText = data.activeSessions;
-            document.getElementById('stat-completed').innerText = data.completedPrayers;
-            document.getElementById('stat-flags').innerText = data.totalFlags;
+    function setStatus(text) {
+      statusText.textContent = text || '';
+    }
+
+    function toDurationLabel(seconds) {
+      const safe = Math.max(0, Math.floor(Number(seconds || 0)));
+      const h = Math.floor(safe / 3600);
+      const m = Math.floor((safe % 3600) / 60);
+      if (h > 0) return `${h}h ${m}m`;
+      return `${m}m`;
+    }
+
+    function toDistanceLabel(meters) {
+      const value = Number(meters || 0);
+      if (value >= 1000) return `${(value / 1000).toFixed(2)} km`;
+      return `${Math.round(value)} m`;
+    }
+
+    function toSpeedLabel(distanceMeters, durationSeconds) {
+      const meters = Math.max(0, Number(distanceMeters || 0));
+      const seconds = Math.max(0, Number(durationSeconds || 0));
+      if (!meters || !seconds) return '0.00 km/h';
+      const km = meters / 1000;
+      const hours = seconds / 3600;
+      if (!hours) return '0.00 km/h';
+      return `${(km / hours).toFixed(2)} km/h`;
+    }
+
+    function toParticipantLabel(walk) {
+      if (!walk || typeof walk !== 'object') return 'Unknown participants';
+
+      if (Array.isArray(walk.participantNames) && walk.participantNames.length) {
+        return walk.participantNames
+          .map((name) => String(name || '').trim())
+          .filter(Boolean)
+          .join(', ');
+      }
+
+      if (Array.isArray(walk.participants) && walk.participants.length) {
+        return walk.participants
+          .map((name) => String(name || '').trim())
+          .filter(Boolean)
+          .join(', ');
+      }
+
+      if (typeof walk.participants === 'string') {
+        try {
+          const parsed = JSON.parse(walk.participants);
+          if (Array.isArray(parsed) && parsed.length) {
+            const names = parsed
+              .map((name) => String(name || '').trim())
+              .filter(Boolean);
+            if (names.length) return names.join(', ');
+          }
+        } catch (_) {}
+      }
+
+      return 'Unknown participants';
+    }
+
+    function toCardParticipantLabel(walk) {
+      const full = toParticipantLabel(walk);
+      if (!full || full === 'Unknown participants') return 'Unknown participants';
+
+      const names = full
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+
+      if (names.length <= 2) return names.join(', ');
+      return `${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
+    }
+
+    function toPointLabel(point) {
+      if (!point) return 'Unknown';
+      const lat = Number(point.latitude);
+      const lng = Number(point.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 'Unknown';
+      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+
+    function getWalkStartEndPoints(walk) {
+      const points = Array.isArray(walk?.points) ? walk.points : [];
+      if (!points.length) return { start: null, end: null };
+      return {
+        start: points[0] || null,
+        end: points[points.length - 1] || points[0] || null
+      };
+    }
+
+    function toHistoryLabel(walk) {
+      const start = typeof walk?.startLocationName === 'string' ? walk.startLocationName.trim() : '';
+      const end = typeof walk?.endLocationName === 'string' ? walk.endLocationName.trim() : '';
+      if (start && end) return start === end ? start : `${start} -> ${end}`;
+      return end || start || walk?.prayerFocus || 'Prayer walk';
+    }
+
+    function highlightDayChips() {
+      document.querySelectorAll('[data-days]').forEach((el) => {
+        const value = Number(el.getAttribute('data-days'));
+        el.classList.toggle('active', value === state.days);
+      });
+    }
+
+    function parseDateTimeLocalValue(value) {
+      if (!value) return null;
+      const ts = new Date(value).getTime();
+      return Number.isFinite(ts) ? ts : null;
+    }
+
+    function deriveFetchDaysFromFilters() {
+      const startTs = parseDateTimeLocalValue(state.filterStartAt);
+      if (!startTs) return state.days;
+      const diff = Date.now() - startTs;
+      const daysFromStart = Math.max(1, Math.ceil(diff / (24 * 60 * 60 * 1000)));
+      return Math.max(state.days, daysFromStart);
+    }
+
+    function setBranchFilterOptions(rows) {
+      const branches = Array.from(
+        new Set(
+          rows
+            .map((row) => String(row.branch || '').trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      const selected = state.filterBranch;
+      branchFilter.innerHTML = [
+        '<option value="">Any branch</option>',
+        ...branches.map((name) => `<option value="${name}">${name}</option>`)
+      ].join('');
+
+      if (selected && branches.includes(selected)) {
+        branchFilter.value = selected;
+      } else {
+        branchFilter.value = '';
+        state.filterBranch = '';
+      }
+    }
+
+    function applyFiltersToRows(rows) {
+      const startTs = parseDateTimeLocalValue(state.filterStartAt);
+      const endTs = parseDateTimeLocalValue(state.filterEndAt);
+      const branch = String(state.filterBranch || '').trim();
+
+      return rows.filter((walk) => {
+        if (branch && String(walk.branch || '').trim() !== branch) return false;
+
+        const startedAtTs = new Date(walk.startedAt).getTime();
+        if (startTs !== null && startedAtTs < startTs) return false;
+        if (endTs !== null && startedAtTs > endTs) return false;
+
+        return true;
+      });
+    }
+
+    function updateStats() {
+      const walks = state.walks;
+      const km = walks.reduce((sum, walk) => sum + Number(walk.distanceMeters || 0), 0) / 1000;
+
+      document.getElementById('statWalks').textContent = String(walks.length);
+      document.getElementById('statDistance').textContent = `${km.toFixed(2)} km`;
+    }
+
+    function focusLayerOnMap(layer, preferZoomIn = true) {
+      if (!layer) return;
+      const targetZoom = 16;
+      const focusTo = (latLng) => {
+        if (!latLng) return;
+        if (preferZoomIn && map.getZoom() < targetZoom) {
+          map.setView(latLng, targetZoom, { animate: true });
+          return;
+        }
+        map.panTo(latLng, { animate: true });
+      };
+
+      if (layer.getBounds) {
+        const bounds = layer.getBounds();
+        if (!bounds || !bounds.isValid()) return;
+        focusTo(bounds.getCenter());
+        return;
+      }
+
+      if (layer.getLatLng) {
+        focusTo(layer.getLatLng());
+      }
+    }
+
+    function renderMap() {
+      layerGroup.clearLayers();
+      state.layers.clear();
+
+      const bounds = [];
+      const walksToRender = state.walks;
+
+      walksToRender.forEach((walk) => {
+        const points = (walk.points || []).map((p) => [Number(p.latitude), Number(p.longitude)]);
+        if (!points.length) return;
+        const isSelected = state.selected?.sessionId === walk.sessionId;
+
+        const opacity = Math.max(0.2, Math.min(1, Number(walk.opacity || 0.5)));
+        const baseColor = walk.walkType === 'area'
+          ? `rgba(46,129,216,${opacity})`
+          : `rgba(223,63,63,${opacity})`;
+        const color = isSelected ? '#1f66ff' : baseColor;
+
+        if (walk.geometryType === 'path' && points.length > 1) {
+          const poly = L.polyline(points, {
+            color,
+            weight: isSelected ? 8 : 6,
+            opacity: isSelected ? 1 : undefined,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }).addTo(layerGroup);
+          poly.on('click', () => {
+            openDetails(walk);
+            focusLayerOnMap(poly);
+          });
+          state.layers.set(walk.sessionId, poly);
+          points.forEach((p) => bounds.push(p));
+
+          const endPoint = points[points.length - 1];
+          if (isSelected) {
+            L.circleMarker(endPoint, {
+              radius: 14,
+              color: '#f08c00',
+              fillColor: '#ffd43b',
+              fillOpacity: 0.22,
+              weight: 3
+            }).addTo(layerGroup);
+          }
+          const endPin = L.marker(endPoint, { title: toHistoryLabel(walk) }).addTo(layerGroup);
+          endPin.on('click', () => {
+            openDetails(walk);
+            focusLayerOnMap(poly);
+          });
+          bounds.push(endPoint);
+        } else {
+          if (isSelected) {
+            L.circleMarker(points[0], {
+              radius: 14,
+              color: '#f08c00',
+              fillColor: '#ffd43b',
+              fillOpacity: 0.22,
+              weight: 3
+            }).addTo(layerGroup);
+          }
+          const marker = L.marker(points[0], { title: toHistoryLabel(walk) }).addTo(layerGroup);
+          marker.on('click', () => {
+            openDetails(walk);
+            focusLayerOnMap(marker);
+          });
+          state.layers.set(walk.sessionId, marker);
+          bounds.push(points[0]);
         }
 
-        async function loadFlags() {
-            const res = await fetch(`${API_URL}/admin/flags`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
-            const tbody = document.getElementById('flags-tbody');
-            tbody.innerHTML = '';
-
-            data.flags.forEach(f => {
-                const tr = document.createElement('tr');
-                tr.className = 'border-b hover:bg-red-50 transition';
-                tr.innerHTML = `
-                    <td class="py-3 font-medium">${f.user.name}</td>
-                    <td class="py-3 uppercase text-xs font-bold">${f.flagType}</td>
-                    <td class="py-3">
-                        <span class="px-2 py-0.5 rounded text-white text-xs ${f.severity === 'high' ? 'bg-red-600' : 'bg-orange-500'}">
-                            ${f.severity}
-                        </span>
-                    </td>
-                    <td class="py-3 text-gray-600">${f.description}</td>
-                    <td class="py-3 font-mono font-bold">${f.session.trustScore}%</td>
-                    <td class="py-3"><button class="text-blue-600 underline">Review</button></td>
-                `;
-                tbody.appendChild(tr);
+        if (walk.walkType === 'area') {
+          const pinPoint = points[points.length - 1] || points[0];
+          if (pinPoint) {
+            if (isSelected) {
+              L.circleMarker(pinPoint, {
+                radius: 14,
+                color: '#f08c00',
+                fillColor: '#ffd43b',
+                fillOpacity: 0.22,
+                weight: 3
+              }).addTo(layerGroup);
+            }
+            const areaPin = L.marker(pinPoint, { title: walk.prayerFocus || 'Area walk' }).addTo(layerGroup);
+            areaPin.bindTooltip(`Area: ${walk.prayerFocus || 'Walked area'}`, { direction: 'top', offset: [0, -8] });
+            areaPin.on('click', () => {
+              openDetails(walk);
+              focusLayerOnMap(areaPin);
             });
+            bounds.push(pinPoint);
+          }
+        }
+      });
+
+      if (!state.selected && state.suppressAutoFitOnce) {
+        const point = state.closeFocusPoint;
+        if (point && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)) {
+          const nextZoom = Math.max(12, Math.min(15, map.getZoom() - 1));
+          map.setView([point.latitude, point.longitude], nextZoom, { animate: true });
+        }
+        state.suppressAutoFitOnce = false;
+        state.closeFocusPoint = null;
+        return;
+      }
+
+      // Only auto-frame once on initial load; keep camera stable during idle refreshes.
+      if (!state.selected && !state.hasAutoFitted && bounds.length > 1) {
+        map.fitBounds(bounds, { padding: [28, 28], maxZoom: 16 });
+        state.hasAutoFitted = true;
+      }
+    }
+
+    function renderHistory() {
+      historyList.innerHTML = '';
+      const sourceWalks = state.selected ? [state.selected] : state.walks;
+      const totalPages = state.selected ? 1 : Math.max(1, Math.ceil(sourceWalks.length / state.pageSize));
+      state.page = Math.max(1, Math.min(state.page, totalPages));
+      const startIdx = state.selected ? 0 : (state.page - 1) * state.pageSize;
+      const endIdx = state.selected ? sourceWalks.length : startIdx + state.pageSize;
+      const walksToRender = sourceWalks.slice(startIdx, endIdx);
+      emptyState.style.display = sourceWalks.length ? 'none' : 'block';
+
+      walksToRender.forEach((walk) => {
+        const row = document.createElement('article');
+        row.className = 'walk';
+        row.onclick = () => {
+          openDetails(walk);
+          try {
+            const layer = state.layers.get(walk.sessionId);
+            focusLayerOnMap(layer);
+          } catch (error) {
+            console.error('Failed to focus map layer:', error);
+          }
+        };
+
+        row.innerHTML = `
+          <div class="walk-top">
+            <span>${new Date(walk.startedAt).toLocaleString()}</span>
+          </div>
+          <div class="focus">${toHistoryLabel(walk)}</div>
+          <div class="meta">
+            <span>Participants: ${toCardParticipantLabel(walk)}</span>
+            <span>Duration: ${toDurationLabel(walk.durationSeconds)}</span>
+            <span>Distance: ${toDistanceLabel(walk.distanceMeters)}</span>
+            <span>Avg speed: ${toSpeedLabel(walk.distanceMeters, walk.durationSeconds)}</span>
+          </div>
+        `;
+
+        historyList.appendChild(row);
+      });
+
+      historyPager.innerHTML = '';
+      if (!state.selected && totalPages > 1) {
+        const prev = document.createElement('button');
+        prev.className = 'pager-btn';
+        prev.textContent = 'Prev';
+        prev.disabled = state.page <= 1;
+        prev.onclick = () => {
+          state.page = Math.max(1, state.page - 1);
+          renderHistory();
+        };
+        historyPager.appendChild(prev);
+
+        for (let i = 1; i <= totalPages; i += 1) {
+          const crumb = document.createElement('button');
+          crumb.className = `pager-btn${i === state.page ? ' active' : ''}`;
+          crumb.textContent = String(i);
+          crumb.onclick = () => {
+            state.page = i;
+            renderHistory();
+          };
+          historyPager.appendChild(crumb);
         }
 
-        async function loadHeatmap() {
-            const res = await fetch(`${API_URL}/admin/heatmap`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
+        const next = document.createElement('button');
+        next.className = 'pager-btn';
+        next.textContent = 'Next';
+        next.disabled = state.page >= totalPages;
+        next.onclick = () => {
+          state.page = Math.min(totalPages, state.page + 1);
+          renderHistory();
+        };
+        historyPager.appendChild(next);
+      }
+    }
 
-            // Clear markers/layers
-            map.eachLayer(l => { if (l instanceof L.HeatLayer || l instanceof L.Marker) map.removeLayer(l); });
+    function clearReplay() {
+      if (state.replayTimer) {
+        window.clearInterval(state.replayTimer);
+        state.replayTimer = null;
+      }
+      if (state.replayMarker) {
+        map.removeLayer(state.replayMarker);
+        state.replayMarker = null;
+      }
+    }
 
-            const heatPoints = data.points.map(p => [p.lat, p.lng, p.weight]);
-            L.heatLayer(heatPoints, { radius: 25 }).addTo(map);
+    function openDetails(walk) {
+      state.selected = walk;
+      renderMap();
+      renderHistory();
+
+      const sheet = document.getElementById('detailSheet');
+      const actionPrimary = document.getElementById('actionPrimary');
+      const walkPoints = getWalkStartEndPoints(walk);
+
+      document.getElementById('detailTitle').textContent = toHistoryLabel(walk);
+      document.getElementById('detailWho').textContent = `Participants: ${toParticipantLabel(walk)}`;
+      document.getElementById('detailWhen').textContent = `When: ${new Date(walk.startedAt).toLocaleString()}`;
+      document.getElementById('detailDuration').textContent = `Duration: ${toDurationLabel(walk.durationSeconds)}`;
+      document.getElementById('detailDistance').textContent = `Distance: ${toDistanceLabel(walk.distanceMeters)}`;
+      document.getElementById('detailSpeed').textContent = `Avg speed: ${toSpeedLabel(walk.distanceMeters, walk.durationSeconds)}`;
+      document.getElementById('detailStartCoord').textContent = `Start lat/lng: ${toPointLabel(walkPoints.start)}`;
+      document.getElementById('detailEndCoord').textContent = `End lat/lng: ${toPointLabel(walkPoints.end)}`;
+      document.getElementById('detailBranch').textContent = `Branch: ${walk.branch || 'Unknown'}`;
+
+      if (walk.walkType === 'path') {
+        actionPrimary.style.display = '';
+        actionPrimary.textContent = 'Replay';
+        actionPrimary.onclick = () => {
+          clearReplay();
+          const points = walk.points || [];
+          if (points.length < 2) return;
+
+          let idx = 0;
+          state.replayMarker = L.circleMarker([points[0].latitude, points[0].longitude], {
+            radius: 6,
+            color: '#0ca678',
+            fillColor: '#0ca678',
+            fillOpacity: 1,
+            weight: 2
+          }).addTo(map);
+
+          state.replayTimer = window.setInterval(() => {
+            idx += 1;
+            if (idx >= points.length) {
+              clearReplay();
+              return;
+            }
+            state.replayMarker.setLatLng([points[idx].latitude, points[idx].longitude]);
+          }, 250);
+        };
+      } else {
+        actionPrimary.style.display = 'none';
+        actionPrimary.onclick = null;
+      }
+
+      sheet.classList.add('show');
+    }
+
+    function closeDetails() {
+      clearReplay();
+      if (state.selected && Array.isArray(state.selected.points) && state.selected.points.length > 0) {
+        const points = state.selected.points;
+        const midIdx = Math.floor(points.length / 2);
+        const focus = points[midIdx] || points[0];
+        state.closeFocusPoint = {
+          latitude: Number(focus.latitude),
+          longitude: Number(focus.longitude)
+        };
+        state.suppressAutoFitOnce = true;
+      }
+      state.selected = null;
+      renderMap();
+      renderHistory();
+      document.getElementById('detailSheet').classList.remove('show');
+    }
+
+    async function fetchHistory() {
+      setStatus('Loading walk history...');
+
+      const makeUrl = () => {
+        const params = new URLSearchParams({
+          limit: '300',
+          days: String(deriveFetchDaysFromFilters()),
+          walkType: 'all',
+          includeActive: 'true'
+        });
+        return `/walks/history?${params.toString()}`;
+      };
+
+      const headers = {
+        Authorization: `Bearer ${authToken}`
+      };
+
+      try {
+        let res = await fetch(makeUrl(), { headers });
+        if (!res.ok) throw new Error(`History failed ${res.status}`);
+        let payload = await res.json();
+        const rows = Array.isArray(payload.routes) ? payload.routes : [];
+
+        state.rawWalks = rows.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+        setBranchFilterOptions(state.rawWalks);
+        state.walks = applyFiltersToRows(state.rawWalks);
+        state.page = 1;
+        if (state.selected) {
+          const refreshedSelected = state.walks.find((walk) => walk.sessionId === state.selected.sessionId);
+          if (refreshedSelected) {
+            state.selected = refreshedSelected;
+          } else {
+            state.selected = null;
+            document.getElementById('detailSheet').classList.remove('show');
+            clearReplay();
+          }
+        }
+        updateStats();
+        renderMap();
+        renderHistory();
+        setStatus(`Showing ${state.walks.length} of ${state.rawWalks.length} walk${state.rawWalks.length === 1 ? '' : 's'}.`);
+      } catch (error) {
+        console.error(error);
+        state.rawWalks = [];
+        state.walks = [];
+        setBranchFilterOptions([]);
+        updateStats();
+        renderMap();
+        renderHistory();
+        setStatus('Failed to fetch walk history.');
+      }
+    }
+
+    function attachEvents() {
+      document.querySelectorAll('[data-days]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          state.days = Number(chip.getAttribute('data-days'));
+          highlightDayChips();
+          fetchHistory();
+        });
+      });
+
+      applyFilterBtn.addEventListener('click', () => {
+        state.filterBranch = branchFilter.value;
+        state.filterStartAt = startDateTime.value;
+        state.filterEndAt = endDateTime.value;
+
+        if (state.filterStartAt && state.filterEndAt) {
+          const startTs = parseDateTimeLocalValue(state.filterStartAt);
+          const endTs = parseDateTimeLocalValue(state.filterEndAt);
+          if (startTs !== null && endTs !== null && startTs > endTs) {
+            setStatus('Start date/time must be before end date/time.');
+            return;
+          }
         }
 
-        async function loadWalkers() {
-            const res = await fetch(`${API_URL}/admin/active-walkers`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
+        fetchHistory();
+      });
 
-            map.eachLayer(l => { if (l instanceof L.HeatLayer || l instanceof L.Marker) map.removeLayer(l); });
+      allWalksBtn.addEventListener('click', () => {
+        state.filterBranch = '';
+        state.filterStartAt = '';
+        state.filterEndAt = '';
+        branchFilter.value = '';
+        startDateTime.value = '';
+        endDateTime.value = '';
+        closeDetails();
+        fetchHistory();
+      });
 
-            data.walkers.forEach(w => {
-                L.marker([w.location.coordinates[1], w.location.coordinates[0]])
-                    .bindPopup(`<b>${w.userName}</b><br>Trust: ${w.trustScore}%`)
-                    .addTo(map);
-            });
-        }
+      document.getElementById('actionSecondary').addEventListener('click', closeDetails);
+      window.addEventListener('beforeunload', clearReplay);
+    }
 
-        // Initialize
-        fetchStats();
-        loadFlags();
-        setInterval(fetchStats, 5000);
-    </script>
+    function init() {
+      attachEvents();
+      highlightDayChips();
+
+      if (!navigator.geolocation) {
+        fetchHistory();
+      } else {
+        navigator.geolocation.getCurrentPosition((position) => {
+          fetchHistory();
+        }, () => fetchHistory(), { timeout: 5000 });
+      }
+
+      window.setInterval(fetchHistory, 30000);
+    }
+
+    init();
+  </script>
 </body>
 
 </html>
