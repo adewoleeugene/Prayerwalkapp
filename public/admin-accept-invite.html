@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Accept Admin Invite</title>
+  <style>
+    body { font-family: "Avenir Next", "Segoe UI", sans-serif; background:#edf1f7; color:#12284a; padding:24px; }
+    .card { max-width:480px; margin:0 auto; background:#fff; border:1px solid #d6dfec; border-radius:14px; padding:20px; }
+    h1 { margin:0 0 12px; font-size:1.4rem; }
+    label { display:block; margin:10px 0 6px; font-weight:600; }
+    input { width:100%; padding:10px 12px; border:1px solid #c6d3e5; border-radius:10px; }
+    button { margin-top:14px; width:100%; border:none; border-radius:10px; background:#1f66ff; color:#fff; font-weight:700; padding:11px 14px; cursor:pointer; }
+    #status { margin-top:10px; color:#5f7292; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Set Your Admin Password</h1>
+    <form id="acceptForm">
+      <label for="name">Full name</label>
+      <input id="name" type="text" required />
+      <label for="password">New password</label>
+      <input id="password" type="password" required autocomplete="new-password" />
+      <button type="submit">Activate Account</button>
+      <p id="status"></p>
+    </form>
+  </main>
+  <script>
+    const statusEl = document.getElementById('status');
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || '';
+
+    document.getElementById('acceptForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      statusEl.textContent = 'Activating account...';
+      try {
+        const res = await fetch('/auth/invite/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token,
+            name: document.getElementById('name').value,
+            password: document.getElementById('password').value,
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to accept invite');
+        localStorage.setItem('adminToken', data.token);
+        localStorage.setItem('adminUserRole', data.user?.role || 'admin');
+        localStorage.setItem('adminUserEmail', data.user?.email || '');
+        window.location.replace((data.user?.role || '').toLowerCase() === 'superadmin' ? '/superadmin.html?v=superadmin-20260224' : '/admin.html?v=admin-search-20260223');
+      } catch (error) {
+        statusEl.textContent = error.message || 'Failed to accept invite';
+      }
+    });
+  </script>
+</body>
+</html>

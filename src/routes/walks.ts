@@ -75,6 +75,39 @@ function parseParticipants(participantsLike: unknown): string[] {
   return [];
 }
 
+function normalizeSearchText(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function parseCoordinateSearchTerm(term: string): { latitude: number; longitude: number } | null {
+  const raw = String(term || '').trim();
+  if (!raw) return null;
+
+  const normalized = raw.replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  let latStr = '';
+  let lngStr = '';
+
+  if (normalized.includes(',')) {
+    const parts = normalized.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      latStr = parts[0];
+      lngStr = parts[1];
+    }
+  } else {
+    const parts = normalized.split(' ').map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      latStr = parts[0];
+      lngStr = parts[1];
+    }
+  }
+
+  const latitude = Number(latStr);
+  const longitude = Number(lngStr);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+
 function calculateDistanceMeters(
   a: { latitude: number; longitude: number },
   b: { latitude: number; longitude: number }
@@ -150,6 +183,7 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
     const fromParam = typeof req.query.from === 'string' ? req.query.from.trim() : '';
     const toParam = typeof req.query.to === 'string' ? req.query.to.trim() : '';
     const allTimeSearch = String(req.query.allTimeSearch || 'false').toLowerCase() === 'true';
+    const allTime = String(req.query.allTime || 'false').toLowerCase() === 'true';
     const limitRaw = Number(req.query.limit || 50);
     const hasAdvancedFilter = hasSearch || hasLocationQuery || !!fromParam || !!toParam;
     const role = req.user?.role || 'user';
@@ -157,16 +191,31 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       res.status(403).json({ error: 'Advanced search is restricted to admin and super admin users.' });
       return;
     }
-    const limitCap = hasAdvancedFilter ? 1000 : 300;
+    const isPrivileged = role === 'admin' || role === 'superadmin';
+    const limitCap = isPrivileged ? 5000 : 300;
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), limitCap) : 50;
     const daysRaw = Number(req.query.days || 14);
     const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 90) : 14;
     const walkType = typeof req.query.walkType === 'string' ? req.query.walkType.trim().toLowerCase() : 'all';
     const includeActive = String(req.query.includeActive || 'true').toLowerCase() !== 'false';
     const branch = typeof req.query.branch === 'string' && req.query.branch.trim() ? req.query.branch.trim() : null;
+    const branchAliases = new Set<string>();
+    if (branch) {
+      branchAliases.add(branch);
+      const mapped = await executeRawQuery<Array<{ name: string; slug: string }>>(
+        `SELECT name, slug
+         FROM branches
+         WHERE LOWER(slug) = LOWER($1) OR LOWER(name) = LOWER($1)
+         LIMIT 1`,
+        [branch]
+      );
+      if (mapped[0]?.name) branchAliases.add(String(mapped[0].name));
+      if (mapped[0]?.slug) branchAliases.add(String(mapped[0].slug));
+    }
+    const branchTerms = Array.from(branchAliases);
     const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const statusFilter = includeActive ? ['completed', 'active', 'abandoned'] : ['completed', 'abandoned'];
-    const shouldApplyDateWindow = !((hasSearch || hasLocationQuery) && allTimeSearch);
+    const shouldApplyDateWindow = !(allTime || ((hasSearch || hasLocationQuery) && allTimeSearch));
 
     const timelineFilter: { gte?: Date; lte?: Date } = {};
     if (fromParam) {
@@ -204,6 +253,10 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
           { user: { is: { name: { contains: q, mode: 'insensitive' } } } },
           { user: { is: { email: { contains: q, mode: 'insensitive' } } } },
           { location: { is: { name: { contains: q, mode: 'insensitive' } } } },
+          { location: { is: { address: { contains: q, mode: 'insensitive' } } } },
+          { location: { is: { category: { contains: q, mode: 'insensitive' } } } },
+          { startLocation: { contains: q, mode: 'insensitive' } },
+          { currentLocation: { contains: q, mode: 'insensitive' } },
         ],
       });
     }
@@ -214,11 +267,13 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
           { startLocation: { contains: locationQuery, mode: 'insensitive' } },
           { currentLocation: { contains: locationQuery, mode: 'insensitive' } },
           { location: { is: { name: { contains: locationQuery, mode: 'insensitive' } } } },
+          { location: { is: { address: { contains: locationQuery, mode: 'insensitive' } } } },
+          { location: { is: { category: { contains: locationQuery, mode: 'insensitive' } } } },
         ],
       });
     }
 
-    const where: any = {
+    const baseWhere: any = {
       status: { in: statusFilter as any },
       ...(
         timelineFilter.gte || timelineFilter.lte
@@ -227,14 +282,27 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
             ? { updatedAt: { gte: fromDate } }
             : {}
       ),
-      ...(branch ? { branch } : {}),
+      ...(branchTerms.length > 0
+        ? {
+            OR: branchTerms.map((term) => ({
+              branch: { contains: term, mode: 'insensitive' as const }
+            }))
+          }
+        : {}),
+    };
+    const where: any = {
+      ...baseWhere,
       ...(andFilters.length > 0 ? { AND: andFilters } : {}),
     };
 
+    const shouldApplyRobustSearch = hasSearch || hasLocationQuery;
+    const dbWhere = shouldApplyRobustSearch ? baseWhere : where;
+    const dbTake = shouldApplyRobustSearch ? limitCap : limit;
+
     const sessions = await prisma.prayerSession.findMany({
-      where,
+      where: dbWhere,
       orderBy: { updatedAt: 'desc' },
-      take: limit,
+      take: dbTake,
       include: {
         location: {
           select: { id: true, name: true, prayerText: true, category: true }
@@ -369,7 +437,60 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       })
       .filter((walk): walk is NonNullable<typeof walk> => !!walk);
 
-    const pathWalks = walks.filter((walk) => walk.geometryType === 'path');
+    const matchesWalkSearch = (walk: (typeof walks)[number], term: string) => {
+      const qTerm = normalizeSearchText(term);
+      if (!qTerm) return true;
+      const haystack = normalizeSearchText([
+        walk.branch,
+        walk.prayerSummary,
+        walk.prayerJournal,
+        walk.prayerFocus,
+        walk.startLocationName,
+        walk.endLocationName,
+        walk.walkerDisplayName,
+        walk.who?.name,
+        walk.who?.email,
+        ...(Array.isArray(walk.participantNames) ? walk.participantNames : [])
+      ].filter(Boolean).join(' '));
+      return haystack.includes(qTerm);
+    };
+
+    const filteredWalks = shouldApplyRobustSearch
+      ? walks.filter((walk) => {
+          if (hasSearch && !matchesWalkSearch(walk, q)) return false;
+          if (hasLocationQuery && !matchesWalkSearch(walk, locationQuery)) return false;
+          return true;
+        })
+      : walks;
+    const coordinateSearch =
+      parseCoordinateSearchTerm(q) || parseCoordinateSearchTerm(locationQuery);
+    const coordinateRadiusMeters = Number.isFinite(Number(req.query.coordRadiusMeters))
+      ? Math.min(Math.max(Number(req.query.coordRadiusMeters), 25), 5000)
+      : 250;
+
+    const coordinateFilteredWalks = coordinateSearch
+      ? filteredWalks.filter((walk) => {
+          const candidates = [
+            walk.startLocation,
+            walk.endLocation,
+            ...(Array.isArray(walk.points) ? walk.points : [])
+          ].filter((point): point is { latitude: number; longitude: number } => (
+            !!point &&
+            Number.isFinite(Number(point.latitude)) &&
+            Number.isFinite(Number(point.longitude))
+          ));
+
+          return candidates.some((point) => (
+            calculateDistanceMeters(
+              { latitude: Number(point.latitude), longitude: Number(point.longitude) },
+              coordinateSearch
+            ) <= coordinateRadiusMeters
+          ));
+        })
+      : filteredWalks;
+    const limitedWalks = coordinateFilteredWalks.slice(0, limit);
+
+    const pathWalks = limitedWalks.filter((walk) => walk.geometryType === 'path');
     const cellCounts = new Map<string, number>();
 
     const toCellKey = (point: { latitude: number; longitude: number }) =>
@@ -387,7 +508,7 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       if (count > maxCellCount) maxCellCount = count;
     }
 
-    const walksWithOpacity = walks.map((walk) => {
+    const walksWithOpacity = limitedWalks.map((walk) => {
       if (walk.geometryType !== 'path') {
         return { ...walk, opacity: 0.5 };
       }

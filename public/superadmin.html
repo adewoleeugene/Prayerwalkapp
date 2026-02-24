@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Superadmin Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #edf1f7;
+      --card: #ffffff;
+      --border: #d6dfec;
+      --text: #12284a;
+      --muted: #5f7292;
+      --primary: #1f66ff;
+      --danger: #b63434;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      padding: 14px;
+    }
+
+    .shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(24, 40, 72, 0.06);
+    }
+
+    .header {
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 1.45rem;
+    }
+
+    .subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn.primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn.ghost {
+      background: #e7edf8;
+      color: var(--text);
+    }
+
+    .btn.danger {
+      background: #ffeaea;
+      color: var(--danger);
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: 1.35fr 0.85fr;
+      gap: 12px;
+    }
+
+    .left,
+    .right {
+      padding: 12px;
+    }
+
+    .right {
+      display: flex;
+      flex-direction: column;
+      min-height: 76vh;
+    }
+
+    #map {
+      width: 100%;
+      min-height: 76vh;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .right-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .right-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .right-title {
+      font-weight: 800;
+      font-size: 1rem;
+    }
+
+    .branch-search {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      color: var(--text);
+      background: #fff;
+      margin-bottom: 8px;
+    }
+
+    .branch-search:focus {
+      outline: 2px solid #8fb3ff;
+      outline-offset: 1px;
+      border-color: #86a9ef;
+    }
+
+    .branch-list,
+    .walk-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .branch-card,
+    .walk-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      padding: 10px;
+      cursor: pointer;
+      transition: box-shadow .15s ease, transform .15s ease;
+    }
+
+    .branch-card:hover,
+    .walk-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(18, 40, 74, 0.08);
+    }
+
+    .walk-card.selected {
+      border-color: #f08c00;
+      background: #fffbf2;
+      box-shadow: 0 0 0 2px rgba(240, 140, 0, 0.18);
+    }
+
+    .branch-name,
+    .walk-name {
+      font-weight: 800;
+      font-size: 0.98rem;
+    }
+
+    .branch-meta,
+    .walk-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    #rightCount {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .branch-summary,
+    .walk-summary {
+      margin-top: 6px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--text);
+      font-size: 0.84rem;
+    }
+
+    .branch-overview {
+      display: none;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 8px;
+      margin: 0;
+    }
+
+    .branch-overview.show {
+      display: grid;
+    }
+
+    .overview-strip {
+      padding: 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #f7faff;
+      padding: 10px;
+    }
+
+    .metric-k {
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .metric-v {
+      margin-top: 5px;
+      font-size: 1.2rem;
+      font-weight: 800;
+    }
+
+    .detail-sheet {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      padding: 10px;
+      display: none;
+    }
+
+    .detail-sheet.show {
+      display: block;
+    }
+
+    .detail-sheet h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+
+    .detail-sheet p {
+      margin: 4px 0;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+
+    .status {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      min-height: 18px;
+    }
+
+    .section-count {
+      margin-top: 6px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .branch-pager {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .pager-btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .pager-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .pin-count-badge {
+      background: #1f66ff;
+      color: #fff;
+      border: 1px solid #ffffff;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1;
+      padding: 3px 6px;
+      box-shadow: 0 2px 8px rgba(17, 36, 66, 0.2);
+      white-space: nowrap;
+    }
+
+    .walk-pin {
+      display: block;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #0f4fd8;
+      border: 2px solid #ffffff;
+      box-shadow: 0 2px 8px rgba(8, 28, 66, 0.35);
+    }
+
+    @media (max-width: 1080px) {
+      .main {
+        grid-template-columns: 1fr;
+      }
+
+      #map {
+        min-height: 52vh;
+      }
+
+      .right {
+        min-height: auto;
+      }
+
+      .branch-list,
+      .walk-list {
+        max-height: 45vh;
+      }
+
+      .branch-overview {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="shell">
+    <header class="panel header">
+      <div>
+        <h1 class="title">Superadmin Dashboard</h1>
+        <p class="subtitle">Branch network overview and branch walk drill-down in one view.</p>
+      </div>
+      <div class="header-actions">
+        <a class="btn primary" href="/superadmin-admins.html?v=superadmin-admins-20260224">Assign Pastors</a>
+        <a class="btn ghost" href="/admin-settings.html?scope=superadmin">Settings</a>
+      </div>
+    </header>
+
+    <section class="panel overview-strip">
+      <section id="branchOverview" class="branch-overview">
+        <article class="metric">
+          <div class="metric-k">Total Walks</div>
+          <div id="metricWalks" class="metric-v">0</div>
+        </article>
+        <article class="metric">
+          <div class="metric-k">Total Distance</div>
+          <div id="metricDistance" class="metric-v">0 km</div>
+        </article>
+        <article class="metric">
+          <div class="metric-k">Prayer Time</div>
+          <div id="metricTime" class="metric-v">0m</div>
+        </article>
+        <article class="metric">
+          <div class="metric-k">Pastor(s)</div>
+          <div id="metricPastors" class="metric-v">Unassigned</div>
+        </article>
+      </section>
+    </section>
+
+    <section class="main">
+      <article class="panel left">
+        <div id="map"></div>
+      </article>
+      <article class="panel right">
+        <div class="right-head">
+          <div class="right-title-wrap">
+            <button id="backBtn" class="btn ghost hidden" type="button"
+              aria-label="Back to all branches">&#8592;</button>
+            <div id="rightTitle" class="right-title">Branches</div>
+          </div>
+        </div>
+        <input id="branchSearchInput" class="branch-search" type="search" placeholder="Search branches..."
+          aria-label="Search branches" />
+        <div id="branchList" class="branch-list"></div>
+        <div id="walkList" class="walk-list hidden"></div>
+
+        <div id="status" class="status"></div>
+        <div class="section-count">
+          <span id="rightCount" class="branch-meta">0 branches</span>
+        </div>
+        <div id="branchPager" class="branch-pager"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const authToken = localStorage.getItem('adminToken') || '';
+    const role = (localStorage.getItem('adminUserRole') || '').toLowerCase();
+    if (!authToken || role !== 'superadmin') window.location.replace('/admin');
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialBranchSlug = String(urlParams.get('branch') || '').trim().toLowerCase();
+
+    const map = L.map('map', { zoomControl: true, maxZoom: 19 }).setView([8.48847, -13.26486], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markerLayer = L.layerGroup().addTo(map);
+    const routeLayer = L.layerGroup().addTo(map);
+
+    const state = {
+      branches: [],
+      branchSummaries: new Map(),
+      selectedBranch: null,
+      selectedWalk: null,
+      selectedWalkKey: null,
+      walks: [],
+      adminUsers: [],
+      branchFilterQuery: '',
+      branchPage: 1,
+      branchPageSize: 5,
+      walkPage: 1,
+      walkPageSize: 5,
+      hasAutoFitted: false,
+      branchMapFitted: false
+    };
+
+    const rightTitle = document.getElementById('rightTitle');
+    const rightCount = document.getElementById('rightCount');
+    const statusEl = document.getElementById('status');
+    const backBtn = document.getElementById('backBtn');
+    const branchList = document.getElementById('branchList');
+    const walkList = document.getElementById('walkList');
+    const branchOverview = document.getElementById('branchOverview');
+    const branchSearchInput = document.getElementById('branchSearchInput');
+    const branchPager = document.getElementById('branchPager');
+
+    function setStatus(text) { statusEl.textContent = text || ''; }
+
+    async function api(url, options = {}) {
+      const timeoutMs = Number(options.timeoutMs || 20000);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${authToken}` },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data;
+    }
+
+    function toDistanceLabel(meters) {
+      const value = Number(meters || 0);
+      if (value >= 1000) return `${(value / 1000).toFixed(2)} km`;
+      return `${Math.round(value)} m`;
+    }
+
+    function toDurationLabel(seconds) {
+      const safe = Math.max(0, Math.floor(Number(seconds || 0)));
+      const hours = Math.floor(safe / 3600);
+      const minutes = Math.floor((safe % 3600) / 60);
+      if (hours > 0) return `${hours}h ${minutes}m`;
+      return `${minutes}m`;
+    }
+
+    function toDateLabel(value) {
+      const d = new Date(value || '');
+      if (Number.isNaN(d.getTime())) return 'Unknown time';
+      return d.toLocaleString();
+    }
+
+    function parsePoints(walk) {
+      const points = Array.isArray(walk?.points) ? walk.points : [];
+      return points
+        .map((p) => ({ latitude: Number(p.latitude), longitude: Number(p.longitude) }))
+        .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+    }
+
+    function distanceMetersBetweenPoints(a, b) {
+      if (!a || !b) return Number.POSITIVE_INFINITY;
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const R = 6371e3;
+      const dLat = toRad(b.latitude - a.latitude);
+      const dLng = toRad(b.longitude - a.longitude);
+      const lat1 = toRad(a.latitude);
+      const lat2 = toRad(b.latitude);
+      const x =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+      return R * c;
+    }
+
+    function pointAtDistance(point, distanceMeters, bearingDegrees = 90) {
+      if (!point) return null;
+      const R = 6371e3;
+      const lat1 = (point.latitude * Math.PI) / 180;
+      const lng1 = (point.longitude * Math.PI) / 180;
+      const brng = (bearingDegrees * Math.PI) / 180;
+      const angDist = distanceMeters / R;
+
+      const lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(angDist) +
+        Math.cos(lat1) * Math.sin(angDist) * Math.cos(brng)
+      );
+      const lng2 = lng1 + Math.atan2(
+        Math.sin(brng) * Math.sin(angDist) * Math.cos(lat1),
+        Math.cos(angDist) - Math.sin(lat1) * Math.sin(lat2)
+      );
+
+      return {
+        latitude: (lat2 * 180) / Math.PI,
+        longitude: (lng2 * 180) / Math.PI,
+      };
+    }
+
+    function buildRadiusClusters(walks, radiusMeters = 250) {
+      const clusters = [];
+      walks.forEach((walk) => {
+        const points = parsePoints(walk);
+        const pinPoint = points[points.length - 1] || points[0];
+        if (!pinPoint) return;
+
+        const nearby = clusters.find((cluster) => {
+          const distance = distanceMetersBetweenPoints(cluster.center, pinPoint);
+          return Number.isFinite(distance) && distance <= radiusMeters;
+        });
+
+        if (nearby) {
+          nearby.members.push(walk);
+          const count = nearby.members.length;
+          nearby.center = {
+            latitude: nearby.center.latitude + (pinPoint.latitude - nearby.center.latitude) / count,
+            longitude: nearby.center.longitude + (pinPoint.longitude - nearby.center.longitude) / count,
+          };
+          return;
+        }
+
+        clusters.push({
+          center: pinPoint,
+          members: [walk],
+        });
+      });
+      return clusters;
+    }
+
+    function getWhoLabel(walk) {
+      return walk.walkerDisplayName || walk?.who?.name || 'Unknown walker';
+    }
+
+    function getFilteredBranches() {
+      const q = String(state.branchFilterQuery || '').trim().toLowerCase();
+      return state.branches.filter((branch) => {
+        if (!q) return true;
+        const name = String(branch?.name || '').toLowerCase();
+        const slug = String(branch?.slug || '').toLowerCase();
+        return name.includes(q) || slug.includes(q);
+      });
+    }
+
+    function getBranchPastorNames(branch) {
+      const targetSlug = String(branch?.slug || '').trim().toLowerCase();
+      const targetName = String(branch?.name || '').trim().toLowerCase();
+      const names = state.adminUsers
+        .filter((admin) => {
+          const adminBranch = String(admin?.branch || '').trim().toLowerCase();
+          return adminBranch && (adminBranch === targetSlug || adminBranch === targetName);
+        })
+        .map((admin) => String(admin?.name || admin?.email || '').trim())
+        .filter(Boolean);
+      return names.length ? names.join(', ') : 'Unassigned';
+    }
+
+    async function fetchBranchSummaries(branches) {
+      const summaries = await Promise.all(branches.map(async (branch) => {
+        try {
+          const data = await api(`/walks/history?limit=5000&walkType=all&includeActive=true&allTime=true&branch=${encodeURIComponent(branch.slug)}`);
+          const rows = Array.isArray(data.routes) ? data.routes : [];
+          const totalDistanceMeters = rows.reduce((sum, row) => sum + Number(row.distanceMeters || 0), 0);
+          const totalDurationSeconds = rows.reduce((sum, row) => sum + Number(row.durationSeconds || 0), 0);
+          return {
+            branchSlug: branch.slug,
+            walkCount: rows.length,
+            totalDistanceMeters,
+            totalDurationSeconds
+          };
+        } catch {
+          return { branchSlug: branch.slug, walkCount: 0, totalDistanceMeters: 0, totalDurationSeconds: 0 };
+        }
+      }));
+      return new Map(summaries.map((item) => [String(item.branchSlug || '').toLowerCase(), item]));
+    }
+
+    function renderAllBranchMarkers() {
+      markerLayer.clearLayers();
+      routeLayer.clearLayers();
+      const bounds = [];
+      const radiusMeters = 250;
+
+      state.branches.forEach((branch) => {
+        const lat = Number(branch.lat);
+        const lng = Number(branch.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        const marker = L.marker([lat, lng], { title: branch.name }).addTo(markerLayer);
+        marker.on('click', () => focusBranch(branch));
+        bounds.push([lat, lng]);
+
+        // Use exact per-branch totals for radar/count display.
+        const summary = state.branchSummaries.get(String(branch.slug || '').toLowerCase()) || {
+          walkCount: 0
+        };
+        const walkCount = Number(summary.walkCount || 0);
+        const center = { latitude: lat, longitude: lng };
+        const badgePoint = pointAtDistance(center, radiusMeters, 45);
+
+        L.circle([center.latitude, center.longitude], {
+          radius: radiusMeters,
+          color: '#1f66ff',
+          weight: 1.5,
+          opacity: 0.35,
+          fillOpacity: 0.05,
+          interactive: false
+        }).addTo(routeLayer);
+
+        if (badgePoint) {
+          L.marker([badgePoint.latitude, badgePoint.longitude], {
+            icon: L.divIcon({
+              className: '',
+              html: `<span class=\"pin-count-badge\">${walkCount}</span>`,
+              iconSize: [28, 20],
+              iconAnchor: [14, 10]
+            }),
+            interactive: false,
+            keyboard: false
+          }).addTo(routeLayer);
+        }
+      });
+
+      if (!state.hasAutoFitted) {
+        if (bounds.length > 1) {
+          map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
+          state.hasAutoFitted = true;
+        } else if (bounds.length === 1) {
+          map.setView(bounds[0], 12);
+          state.hasAutoFitted = true;
+        }
+      }
+    }
+
+    function renderBranchList() {
+      branchList.innerHTML = '';
+      branchPager.innerHTML = '';
+      const filteredBranches = getFilteredBranches();
+      const totalPages = Math.max(1, Math.ceil(filteredBranches.length / state.branchPageSize));
+      state.branchPage = Math.max(1, Math.min(state.branchPage, totalPages));
+      const startIdx = (state.branchPage - 1) * state.branchPageSize;
+      const pageBranches = filteredBranches.slice(startIdx, startIdx + state.branchPageSize);
+
+      pageBranches.forEach((branch) => {
+        const summary = state.branchSummaries.get(String(branch.slug || '').toLowerCase()) || {
+          walkCount: 0,
+          totalDistanceMeters: 0,
+          totalDurationSeconds: 0
+        };
+        const card = document.createElement('article');
+        card.className = 'branch-card';
+        card.innerHTML = `
+          <div class="branch-name">${branch.name} ${branch.isActive ? '' : '(Inactive)'}</div>
+          <div class="branch-meta">${branch.slug} • Radius: ${toDistanceLabel(branch.radiusMeters)}</div>
+          <div class="branch-summary">
+            <span>Walks: ${summary.walkCount}</span>
+            <span>Distance: ${toDistanceLabel(summary.totalDistanceMeters)}</span>
+            <span>Prayer time: ${toDurationLabel(summary.totalDurationSeconds)}</span>
+          </div>
+        `;
+        card.addEventListener('click', () => focusBranch(branch));
+        branchList.appendChild(card);
+      });
+      if (!filteredBranches.length) {
+        const empty = document.createElement('div');
+        empty.className = 'branch-meta';
+        empty.textContent = 'No branches match your search.';
+        branchList.appendChild(empty);
+      }
+      rightCount.textContent = `${filteredBranches.length} branch${filteredBranches.length === 1 ? '' : 'es'}`;
+
+      if (filteredBranches.length > state.branchPageSize) {
+        for (let i = 1; i <= totalPages; i += 1) {
+          const btn = document.createElement('button');
+          btn.className = `pager-btn${i === state.branchPage ? ' active' : ''}`;
+          btn.type = 'button';
+          btn.textContent = String(i);
+          btn.addEventListener('click', () => {
+            state.branchPage = i;
+            renderBranchList();
+          });
+          branchPager.appendChild(btn);
+        }
+      }
+    }
+
+    function renderWalkList() {
+      walkList.innerHTML = '';
+      branchPager.innerHTML = '';
+      const keyedWalks = state.walks.map((walk, index) => ({
+        walk,
+        walkKey: String(walk?.sessionId || walk?.id || `${walk?.startedAt || ''}-${index}`)
+      }));
+      const totalPages = Math.max(1, Math.ceil(keyedWalks.length / state.walkPageSize));
+      state.walkPage = Math.max(1, Math.min(state.walkPage, totalPages));
+      const pageStart = (state.walkPage - 1) * state.walkPageSize;
+      const pagedRows = keyedWalks.slice(pageStart, pageStart + state.walkPageSize);
+      const visibleRows = state.selectedWalkKey
+        ? keyedWalks.filter((row) => row.walkKey === state.selectedWalkKey)
+        : pagedRows;
+
+      visibleRows.forEach(({ walk, walkKey }) => {
+        const isSelected = state.selectedWalkKey === walkKey;
+        const card = document.createElement('article');
+        card.className = 'walk-card' + (isSelected ? ' selected' : '');
+        card.innerHTML = `
+          <div class="walk-name">${walk.prayerFocus || walk.endLocationName || walk.startLocationName || 'Prayer walk'}</div>
+          <div class="walk-meta">${toDateLabel(walk.endedAt || walk.startedAt)} • ${getWhoLabel(walk)}</div>
+          <div class="walk-summary">
+            <span>${toDistanceLabel(walk.distanceMeters)}</span>
+            <span>${toDurationLabel(walk.durationSeconds)}</span>
+            <span>${String(walk.status || 'completed')}</span>
+          </div>
+          ${isSelected ? `
+            <div class="detail-sheet show">
+              <h3>${walk.prayerFocus || walk.endLocationName || walk.startLocationName || 'Walk Details'}</h3>
+              <p>Who: ${getWhoLabel(walk)}</p>
+              <p>When: ${toDateLabel(walk.endedAt || walk.startedAt)}</p>
+              <p>Duration: ${toDurationLabel(walk.durationSeconds)}</p>
+              <p>Distance: ${toDistanceLabel(walk.distanceMeters)}</p>
+              <p>Branch: ${walk.branch || state.selectedBranch?.name || '-'}</p>
+              <p>Type: ${walk.walkType || walk.geometryType || 'path'}</p>
+              <button class="btn ghost inline-close-btn" type="button">Close</button>
+            </div>
+          ` : ''}
+        `;
+        card.addEventListener('click', () => {
+          showWalkDetails(walk, walkKey);
+        });
+        const closeBtn = card.querySelector('.inline-close-btn');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            state.selectedWalk = null;
+            state.selectedWalkKey = null;
+            renderWalkList();
+          });
+        }
+        walkList.appendChild(card);
+      });
+
+      if (state.selectedWalkKey) {
+        rightCount.textContent = `1 of ${state.walks.length} walks`;
+      } else {
+        rightCount.textContent = `${state.walks.length} walk${state.walks.length === 1 ? '' : 's'}`;
+        if (keyedWalks.length > state.walkPageSize) {
+          for (let i = 1; i <= totalPages; i += 1) {
+            const btn = document.createElement('button');
+            btn.className = `pager-btn${i === state.walkPage ? ' active' : ''}`;
+            btn.type = 'button';
+            btn.textContent = String(i);
+            btn.addEventListener('click', () => {
+              state.walkPage = i;
+              renderWalkList();
+            });
+            branchPager.appendChild(btn);
+          }
+        }
+      }
+    }
+
+    function showWalkDetails(walk, walkKey) {
+      if (state.selectedWalkKey === walkKey) {
+        state.selectedWalk = null;
+        state.selectedWalkKey = null;
+        renderWalkList();
+        renderBranchMap();
+        return;
+      }
+      state.selectedWalk = walk;
+      state.selectedWalkKey = walkKey;
+      renderWalkList();
+      renderBranchMap();
+    }
+
+    function renderBranchMap() {
+      markerLayer.clearLayers();
+      routeLayer.clearLayers();
+      const branch = state.selectedBranch;
+      if (!branch) return;
+
+      const centerLat = Number(branch.lat);
+      const centerLng = Number(branch.lng);
+      const bounds = [];
+      const walkBounds = [];
+      const selectedBounds = [];
+      const branchRadiusMeters = Number(branch.radiusMeters || 0);
+      let renderedPins = 0;
+      let renderedPaths = 0;
+
+      if (Number.isFinite(centerLat) && Number.isFinite(centerLng)) {
+        L.marker([centerLat, centerLng], { title: branch.name }).addTo(markerLayer);
+        L.circle([centerLat, centerLng], {
+          radius: branchRadiusMeters,
+          color: '#1f66ff',
+          weight: 2.5,
+          opacity: 0.65,
+          fillOpacity: 0.08
+        }).addTo(markerLayer);
+        // NOTE: only add the center point to bounds, NOT the radius bounds.
+        // Adding the radius corners would zoom the map to cover the enormous service area.
+        bounds.push([centerLat, centerLng]);
+      }
+
+      state.walks.forEach((walk) => {
+        try {
+          const walkKey = String(walk?.sessionId || walk?.id || '');
+          const isSelected = state.selectedWalkKey && state.selectedWalkKey === walkKey;
+          const points = parsePoints(walk);
+          const start = walk?.startLocation && Number.isFinite(Number(walk.startLocation.latitude)) && Number.isFinite(Number(walk.startLocation.longitude))
+            ? [Number(walk.startLocation.latitude), Number(walk.startLocation.longitude)]
+            : null;
+          const end = walk?.endLocation && Number.isFinite(Number(walk.endLocation.latitude)) && Number.isFinite(Number(walk.endLocation.longitude))
+            ? [Number(walk.endLocation.latitude), Number(walk.endLocation.longitude)]
+            : null;
+          const latlngs = points.map((p) => [p.latitude, p.longitude]);
+
+          const routeColor = isSelected ? '#f08c00' : '#df3f3f';
+          const routeWeight = isSelected ? 6 : 4;
+          const routeOpacity = isSelected ? 1 : 0.55;
+
+          if (latlngs.length > 1) {
+            const poly = L.polyline(latlngs, { color: routeColor, weight: routeWeight, opacity: routeOpacity }).addTo(routeLayer);
+            poly.on('click', () => showWalkDetails(walk, walkKey));
+            renderedPaths += 1;
+          }
+
+          const markerPoint = latlngs[latlngs.length - 1] || end || start || latlngs[0];
+          if (markerPoint) {
+            const pinMarker = L.marker(markerPoint, {
+              title: walk.prayerFocus || 'Prayer walk',
+              zIndexOffset: isSelected ? 2000 : 1000,
+              icon: L.divIcon({
+                className: '',
+                html: isSelected
+                  ? '<span class="walk-pin" style="background:#f08c00;width:20px;height:20px;border-width:3px;"></span>'
+                  : '<span class="walk-pin"></span>',
+                iconSize: isSelected ? [20, 20] : [16, 16],
+                iconAnchor: isSelected ? [10, 10] : [8, 8]
+              })
+            }).addTo(routeLayer);
+            pinMarker.on('click', () => showWalkDetails(walk, walkKey));
+            L.circleMarker(markerPoint, {
+              radius: isSelected ? 9 : 6,
+              color: '#ffffff',
+              fillColor: isSelected ? '#f08c00' : '#0f4fd8',
+              fillOpacity: 0.95,
+              weight: 2
+            }).addTo(routeLayer);
+            renderedPins += 1;
+            bounds.push(markerPoint);
+            walkBounds.push(markerPoint);
+            if (isSelected) selectedBounds.push(markerPoint);
+          }
+
+          latlngs.forEach((p) => {
+            bounds.push(p);
+            walkBounds.push(p);
+            if (isSelected) selectedBounds.push(p);
+          });
+        } catch (walkRenderError) {
+          console.error('Walk render error:', walkRenderError, walk);
+        }
+      });
+
+      // In branch focus view, show exact walk count for the branch.
+      if (!state.selectedWalkKey && Number.isFinite(centerLat) && Number.isFinite(centerLng)) {
+        const center = { latitude: centerLat, longitude: centerLng };
+        const badgePoint = pointAtDistance(center, 250, 45);
+
+        if (badgePoint) {
+          L.marker([badgePoint.latitude, badgePoint.longitude], {
+            icon: L.divIcon({
+              className: '',
+              html: `<span class=\"pin-count-badge\">${state.walks.length}</span>`,
+              iconSize: [28, 20],
+              iconAnchor: [14, 10]
+            }),
+            interactive: false,
+            keyboard: false
+          }).addTo(routeLayer);
+        }
+      }
+
+      // Only auto-fit the map on first branch load. Walk selection just re-renders
+      // the layers to highlight the chosen walk — the viewport stays exactly as-is.
+      if (!state.selectedWalkKey && !state.branchMapFitted) {
+        if (walkBounds.length > 1) {
+          map.fitBounds(walkBounds, { padding: [40, 40], maxZoom: 16 });
+          state.branchMapFitted = true;
+        } else if (walkBounds.length === 1) {
+          map.setView(walkBounds[0], 15);
+          state.branchMapFitted = true;
+        } else if (bounds.length > 1) {
+          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+          state.branchMapFitted = true;
+        } else if (bounds.length === 1) {
+          map.setView(bounds[0], 13);
+          state.branchMapFitted = true;
+        }
+      }
+      setStatus(`Loaded ${state.walks.length} walk${state.walks.length === 1 ? '' : 's'} for ${branch.name}. Rendered ${renderedPins} pin${renderedPins === 1 ? '' : 's'}, ${renderedPaths} path${renderedPaths === 1 ? '' : 's'}.`);
+    }
+
+    function showBranchOverview(branch) {
+      const summary = branch ? {
+        walkCount: state.walks.length,
+        totalDistanceMeters: state.walks.reduce((sum, row) => sum + Number(row.distanceMeters || 0), 0),
+        totalDurationSeconds: state.walks.reduce((sum, row) => sum + Number(row.durationSeconds || 0), 0)
+      } : {
+        walkCount: state.branches.reduce((sum, b) => {
+          const s = state.branchSummaries.get(String(b.slug || '').toLowerCase());
+          return sum + Number(s?.walkCount || 0);
+        }, 0),
+        totalDistanceMeters: state.branches.reduce((sum, b) => {
+          const s = state.branchSummaries.get(String(b.slug || '').toLowerCase());
+          return sum + Number(s?.totalDistanceMeters || 0);
+        }, 0),
+        totalDurationSeconds: state.branches.reduce((sum, b) => {
+          const s = state.branchSummaries.get(String(b.slug || '').toLowerCase());
+          return sum + Number(s?.totalDurationSeconds || 0);
+        }, 0)
+      };
+      document.getElementById('metricWalks').textContent = String(summary.walkCount);
+      document.getElementById('metricDistance').textContent = toDistanceLabel(summary.totalDistanceMeters);
+      document.getElementById('metricTime').textContent = toDurationLabel(summary.totalDurationSeconds);
+      document.getElementById('metricPastors').textContent = branch
+        ? getBranchPastorNames(branch)
+        : `${state.adminUsers.filter((admin) => admin?.isActive !== false).length} assigned`;
+      branchOverview.classList.add('show');
+    }
+
+    async function focusBranch(branch) {
+      setStatus(`Loading ${branch.name} walks...`);
+      state.selectedWalk = null;
+      state.selectedWalkKey = null;
+      state.walkPage = 1;
+      state.selectedBranch = branch;
+      state.branchMapFitted = false; // Reset so the map will fit once walks load.
+      window.history.replaceState({}, document.title, `/superadmin.html?branch=${encodeURIComponent(branch.slug)}`);
+
+      // Switch UI state immediately so branch navigation always responds.
+      rightTitle.textContent = branch.name;
+      branchList.classList.add('hidden');
+      walkList.classList.remove('hidden');
+      backBtn.classList.remove('hidden');
+      branchSearchInput.classList.add('hidden');
+      branchPager.classList.remove('hidden');
+      state.walks = [];
+      renderWalkList();
+      showBranchOverview(branch);
+      try {
+        renderBranchMap();
+      } catch (error) {
+        console.error('Branch map render error (preload):', error);
+      }
+
+      try {
+        const encodedBranch = encodeURIComponent(branch.slug);
+        let data;
+        try {
+          data = await api(`/walks/history?limit=2000&walkType=all&includeActive=true&allTime=true&branch=${encodedBranch}`, { timeoutMs: 20000 });
+        } catch (firstError) {
+          console.warn('Primary branch walk load failed; retrying with lighter query.', firstError);
+          data = await api(`/walks/history?limit=500&walkType=all&includeActive=false&allTime=true&branch=${encodedBranch}`, { timeoutMs: 15000 });
+        }
+        state.walks = Array.isArray(data?.routes) ? data.routes : [];
+
+        renderWalkList();
+        showBranchOverview(branch);
+        try {
+          renderBranchMap();
+        } catch (error) {
+          console.error('Branch map render error (loaded):', error);
+        }
+
+        setStatus(`Loaded ${state.walks.length} walk${state.walks.length === 1 ? '' : 's'} for ${branch.name}.`);
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || 'Failed to load branch walks.');
+      }
+    }
+
+    function exitBranchFocus() {
+      state.selectedBranch = null;
+      state.selectedWalk = null;
+      state.selectedWalkKey = null;
+      state.walks = [];
+      state.walkPage = 1;
+      state.branchMapFitted = false;
+
+      rightTitle.textContent = 'Branches';
+      branchList.classList.remove('hidden');
+      walkList.classList.add('hidden');
+      backBtn.classList.add('hidden');
+      branchSearchInput.classList.remove('hidden');
+      branchPager.classList.remove('hidden');
+      showBranchOverview(null);
+      window.history.replaceState({}, document.title, '/superadmin.html');
+
+      renderBranchList();
+      renderAllBranchMarkers();
+      setStatus(`Loaded ${state.branches.length} branch${state.branches.length === 1 ? '' : 'es'}.`);
+    }
+
+    async function loadDashboard() {
+      if (state.selectedBranch) return;
+      setStatus('Loading branches...');
+      try {
+        const [branchesData, adminsData] = await Promise.all([
+          api('/admin/branches'),
+          api('/admin/admin-users').catch(() => ({ admins: [] }))
+        ]);
+        state.branches = Array.isArray(branchesData.branches) ? branchesData.branches : [];
+        state.adminUsers = Array.isArray(adminsData.admins) ? adminsData.admins : [];
+        state.branchSummaries = await fetchBranchSummaries(state.branches);
+        renderBranchList();
+        showBranchOverview(null);
+        renderAllBranchMarkers();
+
+        if (initialBranchSlug && !state.selectedBranch) {
+          const matched = state.branches.find((branch) => {
+            const slug = String(branch?.slug || '').trim().toLowerCase();
+            const name = String(branch?.name || '').trim().toLowerCase();
+            return slug === initialBranchSlug || name === initialBranchSlug;
+          });
+          if (matched) {
+            await focusBranch(matched);
+            return;
+          }
+          setStatus(`Branch "${initialBranchSlug}" not found.`);
+        }
+
+        setStatus(`Loaded ${state.branches.length} branch${state.branches.length === 1 ? '' : 'es'}.`);
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || 'Failed to load dashboard.');
+      }
+    }
+
+    backBtn.addEventListener('click', exitBranchFocus);
+    branchSearchInput.addEventListener('input', () => {
+      state.branchFilterQuery = branchSearchInput.value || '';
+      state.branchPage = 1;
+      if (!state.selectedBranch) {
+        renderBranchList();
+      }
+    });
+
+    loadDashboard();
+    window.setInterval(loadDashboard, 60000);
+  </script>
+</body>
+
+</html>

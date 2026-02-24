@@ -10,6 +10,7 @@ export interface JWTPayload {
     email: string;
     role: string;
     branch: string | null;
+    tokenVersion: number;
 }
 
 // Hash password

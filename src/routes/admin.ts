@@ -2,6 +2,11 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/db';
 import { executeRawQuery } from '../lib/db';
 import { authenticate } from '../middleware/authMiddleware';
+import { createOpaqueToken, hashToken } from '../lib/security';
+import { buildInviteEmailHtml, buildResetEmailHtml, sendEmail } from '../lib/mail';
+import { writeAuditLog } from '../lib/audit';
+import { bumpTokenVersion } from '../lib/accountSecurity';
+import { hashPassword, isValidPassword, verifyPassword } from '../lib/auth';
 
 const router = Router();
 
@@ -69,6 +74,129 @@ function slugify(value: string): string {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
 }
+
+function getAppBaseUrl(req: Request): string {
+    const configured = (process.env.APP_BASE_URL || '').trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    return `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+}
+
+// GET /admin/me - Current admin profile
+router.get('/me', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope) {
+            return;
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.userId },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                branch: true,
+                lastLogin: true,
+                isActive: true,
+            }
+        });
+
+        if (!user || !user.isActive) {
+            res.status(404).json({ error: 'Admin account not found' });
+            return;
+        }
+
+        res.json({
+            success: true,
+            profile: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                branch: user.branch,
+                lastLoginAt: user.lastLogin,
+            }
+        });
+    } catch (error) {
+        console.error('Admin me error:', error);
+        res.status(500).json({ error: 'Failed to load admin profile' });
+    }
+});
+
+// POST /admin/change-password - Current admin password update
+router.post('/change-password', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope) {
+            return;
+        }
+
+        const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+        const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+
+        if (!currentPassword || !newPassword) {
+            res.status(400).json({ error: 'currentPassword and newPassword are required' });
+            return;
+        }
+
+        const passwordValidation = isValidPassword(newPassword);
+        if (!passwordValidation.valid) {
+            res.status(400).json({ error: passwordValidation.message || 'Invalid password' });
+            return;
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.userId },
+            select: {
+                id: true,
+                email: true,
+                role: true,
+                passwordHash: true,
+                isActive: true,
+            }
+        });
+
+        if (!user || !user.isActive || (user.role !== 'admin' && user.role !== 'superadmin')) {
+            res.status(404).json({ error: 'Admin account not found' });
+            return;
+        }
+
+        const passwordMatches = await verifyPassword(currentPassword, user.passwordHash);
+        if (!passwordMatches) {
+            res.status(401).json({ error: 'Current password is incorrect' });
+            return;
+        }
+
+        const sameAsCurrent = await verifyPassword(newPassword, user.passwordHash);
+        if (sameAsCurrent) {
+            res.status(400).json({ error: 'New password must be different from current password' });
+            return;
+        }
+
+        const newPasswordHash = await hashPassword(newPassword);
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash: newPasswordHash }
+        });
+        await bumpTokenVersion(user.id);
+
+        await writeAuditLog({
+            actorUserId: user.id,
+            action: 'password_changed_by_user',
+            targetUserId: user.id,
+            metadata: { role: user.role, email: user.email }
+        });
+
+        res.json({
+            success: true,
+            message: 'Password updated. Please log in again.'
+        });
+    } catch (error) {
+        console.error('Admin change password error:', error);
+        res.status(500).json({ error: 'Failed to update password' });
+    }
+});
 
 // GET /admin/stats - High level metrics
 router.get('/stats', async (req: Request, res: Response) => {
@@ -418,7 +546,7 @@ router.patch('/branches/:id', async (req: Request, res: Response) => {
             const rows = await executeRawQuery<{ id: string; name: string; slug: string }[]>(
                 `SELECT id, name, slug
                  FROM branches
-                 WHERE id = $1`,
+                 WHERE id = $1::uuid`,
                 [id]
             );
             if (rows.length === 0) {
@@ -521,7 +649,7 @@ router.patch('/branches/:id', async (req: Request, res: Response) => {
         const rows = await executeRawQuery<any[]>(
             `UPDATE branches
              SET ${updates.join(', ')}, updated_at = NOW()
-             WHERE id = $${index}
+             WHERE id = $${index}::uuid
              RETURNING id, name, slug, center_lat, center_lng, service_radius_meters, country, region, is_active, sort_order, created_at, updated_at`,
             values
         );
@@ -587,6 +715,411 @@ router.delete('/branches/:id', async (req: Request, res: Response) => {
     } catch (e) {
         console.error('Admin branch delete error:', e);
         res.status(500).json({ error: 'Failed to deactivate branch' });
+    }
+});
+
+// GET /admin/admin-users - list branch admins
+router.get('/admin-users', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const users = await prisma.user.findMany({
+            where: { role: 'admin' as any },
+            orderBy: [{ branch: 'asc' }, { createdAt: 'desc' }],
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                branch: true,
+                isActive: true,
+                lastLogin: true,
+                createdAt: true,
+                updatedAt: true,
+            }
+        });
+
+        const inviteRows = await executeRawQuery<Array<{
+            id: string;
+            email: string;
+            status: string;
+            expires_at: string;
+            created_at: string;
+        }>>(
+            `SELECT DISTINCT ON (LOWER(email))
+                id, email, status, expires_at, created_at
+             FROM admin_invites
+             ORDER BY LOWER(email), created_at DESC`
+        );
+        const inviteByEmail = new Map(inviteRows.map((row) => [String(row.email).toLowerCase(), row] as const));
+
+        res.json({
+            success: true,
+            count: users.length,
+            admins: users.map((user) => {
+                const invite = inviteByEmail.get(String(user.email).toLowerCase());
+                return {
+                    ...user,
+                    inviteId: invite?.id || null,
+                    inviteStatus: invite?.status || null,
+                    inviteExpiresAt: invite?.expires_at || null,
+                    inviteCreatedAt: invite?.created_at || null,
+                };
+            })
+        });
+    } catch (error) {
+        console.error('Admin users list error:', error);
+        res.status(500).json({ error: 'Failed to list admin users' });
+    }
+});
+
+// POST /admin/admin-invites - create and send invite
+router.post('/admin-invites', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : '';
+        const requestedPastorName = typeof req.body?.pastorName === 'string' ? req.body.pastorName.trim() : '';
+        const fallbackPastorName = email.includes('@') ? email.split('@')[0] : '';
+        const pastorName = requestedPastorName || fallbackPastorName || 'Assigned Pastor';
+        if (!email || !branch) {
+            res.status(400).json({ error: 'email and branch are required' });
+            return;
+        }
+
+        const branchRows = await executeRawQuery<Array<{ id: string; name: string; slug: string }>>(
+            `SELECT id, name, slug
+             FROM branches
+             WHERE LOWER(slug) = LOWER($1) OR LOWER(name) = LOWER($1)
+             LIMIT 1`,
+            [branch]
+        );
+        const matchedBranch = branchRows[0];
+        if (!matchedBranch) {
+            res.status(400).json({ error: 'Branch not found' });
+            return;
+        }
+
+        const rawToken = createOpaqueToken();
+        const tokenHash = hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+        const rows = await executeRawQuery<Array<{ id: string }>>(
+            `INSERT INTO admin_invites (email, branch, role, token_hash, expires_at, status, invited_by_user_id, sent_at)
+             VALUES ($1, $2, 'admin', $3, $4::timestamptz, 'pending', $5::uuid, NOW())
+             RETURNING id`,
+            [email, matchedBranch.slug, tokenHash, expiresAt.toISOString(), req.user!.userId]
+        );
+
+        const inviteId = rows[0]?.id;
+        const link = `${getAppBaseUrl(req)}/admin-accept-invite.html?token=${encodeURIComponent(rawToken)}`;
+        let emailSent = true;
+        let emailError: string | null = null;
+        try {
+            await sendEmail({
+                to: email,
+                subject: `Branch admin invite - ${matchedBranch.name}`,
+                html: buildInviteEmailHtml(link, matchedBranch.name, expiresAt.toISOString())
+            });
+        } catch (mailError: any) {
+            emailSent = false;
+            emailError = String(mailError?.message || 'Email delivery failed');
+            console.error('Admin invite email send error:', mailError);
+        }
+
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'invite_created',
+            metadata: { inviteId, email, pastorName, branch: matchedBranch.slug }
+        });
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'invite_sent',
+            metadata: { inviteId, email, pastorName, branch: matchedBranch.slug, emailSent, emailError }
+        });
+
+        res.status(201).json({
+            success: true,
+            inviteId,
+            email,
+            pastorName,
+            branch: matchedBranch.slug,
+            expiresAt: expiresAt.toISOString(),
+            inviteLink: link,
+            emailSent,
+            warning: emailSent ? undefined : 'Invite created, but email delivery failed. Configure Resend/domain to send externally.'
+        });
+    } catch (error: any) {
+        console.error('Admin invite create error:', error);
+        const details = String(error?.message || '');
+        res.status(500).json({ error: 'Failed to create invite', details: details || undefined });
+    }
+});
+
+// POST /admin/admin-invites/:id/resend
+router.post('/admin-invites/:id/resend', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const rows = await executeRawQuery<Array<{
+            id: string;
+            email: string;
+            branch: string;
+            status: string;
+        }>>(
+            `SELECT id, email, branch, status
+             FROM admin_invites
+             WHERE id = $1
+             LIMIT 1`,
+            [id]
+        );
+        const invite = rows[0];
+        if (!invite) {
+            res.status(404).json({ error: 'Invite not found' });
+            return;
+        }
+        if (invite.status === 'accepted') {
+            res.status(400).json({ error: 'Cannot resend an accepted invite' });
+            return;
+        }
+
+        await executeRawQuery(
+            `UPDATE admin_invites
+             SET status = CASE WHEN status = 'pending' THEN 'expired' ELSE status END,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [invite.id]
+        );
+
+        const rawToken = createOpaqueToken();
+        const tokenHash = hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+        const inserted = await executeRawQuery<Array<{ id: string }>>(
+            `INSERT INTO admin_invites (email, branch, role, token_hash, expires_at, status, invited_by_user_id, sent_at)
+             VALUES ($1, $2, 'admin', $3, $4::timestamptz, 'pending', $5::uuid, NOW())
+             RETURNING id`,
+            [invite.email, invite.branch, tokenHash, expiresAt.toISOString(), req.user!.userId]
+        );
+        const newInviteId = inserted[0]?.id;
+
+        const link = `${getAppBaseUrl(req)}/admin-accept-invite.html?token=${encodeURIComponent(rawToken)}`;
+        let emailSent = true;
+        let emailError: string | null = null;
+        try {
+            await sendEmail({
+                to: invite.email,
+                subject: `Branch admin invite reminder - ${invite.branch}`,
+                html: buildInviteEmailHtml(link, invite.branch, expiresAt.toISOString())
+            });
+        } catch (mailError: any) {
+            emailSent = false;
+            emailError = String(mailError?.message || 'Email delivery failed');
+            console.error('Admin invite resend email error:', mailError);
+        }
+
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'invite_resent',
+            metadata: { inviteId: newInviteId, replacedInviteId: invite.id, email: invite.email, branch: invite.branch }
+        });
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'invite_sent',
+            metadata: { inviteId: newInviteId, email: invite.email, branch: invite.branch, emailSent, emailError }
+        });
+
+        res.json({
+            success: true,
+            inviteId: newInviteId,
+            email: invite.email,
+            branch: invite.branch,
+            expiresAt: expiresAt.toISOString(),
+            inviteLink: link,
+            emailSent,
+            warning: emailSent ? undefined : 'Invite recreated, but email delivery failed. Configure Resend/domain to send externally.'
+        });
+    } catch (error) {
+        console.error('Admin invite resend error:', error);
+        res.status(500).json({ error: 'Failed to resend invite' });
+    }
+});
+
+// POST /admin/admin-users/:id/deactivate
+router.post('/admin-users/:id/deactivate', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user || user.role !== 'admin') {
+            res.status(404).json({ error: 'Admin user not found' });
+            return;
+        }
+
+        await prisma.user.update({
+            where: { id },
+            data: { isActive: false }
+        });
+        await bumpTokenVersion(id);
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'admin_deactivated',
+            targetUserId: id,
+            metadata: { email: user.email, branch: user.branch }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin deactivate error:', error);
+        res.status(500).json({ error: 'Failed to deactivate admin' });
+    }
+});
+
+// POST /admin/admin-users/:id/reactivate
+router.post('/admin-users/:id/reactivate', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user || user.role !== 'admin') {
+            res.status(404).json({ error: 'Admin user not found' });
+            return;
+        }
+
+        await prisma.user.update({
+            where: { id },
+            data: { isActive: true }
+        });
+        await bumpTokenVersion(id);
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'admin_reactivated',
+            targetUserId: id,
+            metadata: { email: user.email, branch: user.branch }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin reactivate error:', error);
+        res.status(500).json({ error: 'Failed to reactivate admin' });
+    }
+});
+
+// POST /admin/admin-users/:id/reassign-branch
+router.post('/admin-users/:id/reassign-branch', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : '';
+        if (!branch) {
+            res.status(400).json({ error: 'branch is required' });
+            return;
+        }
+
+        const branchRows = await executeRawQuery<Array<{ name: string; slug: string }>>(
+            `SELECT name, slug
+             FROM branches
+             WHERE LOWER(slug) = LOWER($1) OR LOWER(name) = LOWER($1)
+             LIMIT 1`,
+            [branch]
+        );
+        const matchedBranch = branchRows[0];
+        if (!matchedBranch) {
+            res.status(400).json({ error: 'Branch not found' });
+            return;
+        }
+
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user || user.role !== 'admin') {
+            res.status(404).json({ error: 'Admin user not found' });
+            return;
+        }
+
+        await prisma.user.update({
+            where: { id },
+            data: { branch: matchedBranch.slug }
+        });
+        await bumpTokenVersion(id);
+
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'admin_branch_reassigned',
+            targetUserId: id,
+            metadata: { fromBranch: user.branch, toBranch: matchedBranch.slug, email: user.email }
+        });
+
+        res.json({ success: true, branch: matchedBranch.slug });
+    } catch (error) {
+        console.error('Admin reassign branch error:', error);
+        res.status(500).json({ error: 'Failed to reassign admin branch' });
+    }
+});
+
+// POST /admin/admin-users/:id/reset-password
+router.post('/admin-users/:id/reset-password', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user || user.role !== 'admin') {
+            res.status(404).json({ error: 'Admin user not found' });
+            return;
+        }
+
+        const rawToken = createOpaqueToken();
+        const tokenHash = hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+        await executeRawQuery(
+            `INSERT INTO password_resets (user_id, token_hash, expires_at, status, requested_by, created_by_user_id)
+             VALUES ($1::uuid, $2, $3::timestamptz, 'pending', 'superadmin', $4::uuid)`,
+            [user.id, tokenHash, expiresAt.toISOString(), req.user!.userId]
+        );
+        await bumpTokenVersion(user.id);
+
+        const link = `${getAppBaseUrl(req)}/admin-reset-password.html?token=${encodeURIComponent(rawToken)}`;
+        await sendEmail({
+            to: user.email,
+            subject: 'Admin password reset',
+            html: buildResetEmailHtml(link, expiresAt.toISOString())
+        });
+
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'password_reset_requested',
+            targetUserId: user.id,
+            metadata: { requestedBy: 'superadmin', email: user.email }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin reset password error:', error);
+        res.status(500).json({ error: 'Failed to send reset password link' });
     }
 });
 

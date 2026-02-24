@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Assign Pastors</title>
+  <style>
+    :root { --bg:#edf1f7; --card:#fff; --border:#d6dfec; --text:#12284a; --muted:#5f7292; --primary:#1f66ff; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:"Avenir Next","Segoe UI",sans-serif;padding:14px}
+    .shell{max-width:1200px;margin:0 auto;display:grid;gap:12px}
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 22px rgba(24,40,72,.06);padding:12px}
+    .header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .header-actions{display:flex;gap:8px;flex-wrap:wrap}
+    h1{margin:0;font-size:1.35rem} h2{margin:0 0 10px;font-size:1.1rem}
+    .muted{color:var(--muted);font-size:.92rem}
+    .btn{border:none;border-radius:999px;padding:10px 14px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block;background:#e7edf8;color:var(--text)}
+    .btn.primary{background:var(--primary);color:#fff}
+    .grid{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center}
+    input,select{width:100%;border:2px solid var(--border);border-radius:999px;background:#fff;color:var(--text);padding:9px 12px;font-size:.94rem}
+    .status{margin-top:8px;color:var(--muted);font-size:.9rem;min-height:18px}
+    .list{display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow:auto}
+    .item{border:1px solid var(--border);border-radius:12px;background:#fff;padding:10px}
+    .item-top{font-weight:800}
+    .item-meta{margin-top:4px;color:var(--muted);font-size:.84rem}
+    .actions{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .mini-input{border:1px solid var(--border);border-radius:8px;padding:6px 8px;min-width:150px;max-width:220px}
+    .mini-btn{border:1px solid var(--border);border-radius:999px;padding:5px 10px;background:#fff;color:var(--text);cursor:pointer;font-size:.8rem;font-weight:700}
+    .mini-btn.warn{background:#ffe8e8;border-color:#ffb3b3;color:#9d2020}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel header">
+      <div>
+        <h1>Assign Admins</h1>
+        <div class="muted">Assign pastors to branches and manage pastor access.</div>
+      </div>
+      <div class="header-actions">
+        <a class="btn" href="/superadmin.html?v=superadmin-20260224">Back to Dashboard</a>
+        <a class="btn" href="/admin-settings.html?scope=superadmin">Settings</a>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Assign Pastor To Branch</h2>
+      <div class="grid">
+        <input id="inviteName" type="text" placeholder="Pastor name" />
+        <input id="inviteEmail" type="email" placeholder="Pastor email" />
+        <select id="inviteBranch"><option value="">Select branch</option></select>
+        <button id="sendInviteBtn" class="btn primary">Assign Pastor</button>
+      </div>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Existing Pastors</h2>
+      <div id="adminList" class="list"></div>
+    </section>
+  </main>
+
+  <script>
+    const authToken = localStorage.getItem('adminToken') || '';
+    const role = (localStorage.getItem('adminUserRole') || '').toLowerCase();
+    if (!authToken || role !== 'superadmin') window.location.replace('/admin');
+
+    const inviteName = document.getElementById('inviteName');
+    const inviteEmail = document.getElementById('inviteEmail');
+    const inviteBranch = document.getElementById('inviteBranch');
+    const sendInviteBtn = document.getElementById('sendInviteBtn');
+    const statusEl = document.getElementById('status');
+    const adminList = document.getElementById('adminList');
+
+    const state = { branches: [], admins: [] };
+
+    function setStatus(text){ statusEl.textContent = text || ''; }
+    function safe(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;'); }
+
+    async function api(url, options = {}) {
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data;
+    }
+
+    function branchOptions(selected){
+      const current = String(selected || '').toLowerCase();
+      const html = ['<option value="">Select branch</option>'];
+      state.branches.forEach((b)=>{
+        const selectedAttr = current && String(b.slug || '').toLowerCase() === current ? ' selected' : '';
+        html.push(`<option value="${safe(b.slug)}"${selectedAttr}>${safe(b.name)} (${safe(b.slug)})</option>`);
+      });
+      return html.join('');
+    }
+
+    function renderAdmins(){
+      adminList.innerHTML = '';
+      if (!state.admins.length) {
+        adminList.innerHTML = '<div class="muted">No admin users found.</div>';
+        return;
+      }
+
+      state.admins.forEach((admin)=>{
+        const inviteId = admin.inviteId || '';
+        const card = document.createElement('article');
+        card.className = 'item';
+        card.innerHTML = `
+          <div class="item-top">${safe(admin.name || admin.email)} ${admin.isActive ? '' : '(Inactive)'}</div>
+          <div class="item-meta">${safe(admin.email)} • Branch: ${safe(admin.branch || 'Unassigned')} • Invite: ${safe(admin.inviteStatus || 'none')} • Last login: ${admin.lastLogin ? new Date(admin.lastLogin).toLocaleString() : 'Never'}</div>
+          <div class="actions">
+            <select class="mini-input" data-branch-input="${admin.id}">${branchOptions(admin.branch || '')}</select>
+            <button class="mini-btn" data-action="reassign" data-id="${admin.id}">Reassign</button>
+            <button class="mini-btn" data-action="reset" data-id="${admin.id}">Send Reset</button>
+            <button class="mini-btn" data-action="resend" data-id="${inviteId}" ${inviteId ? '' : 'disabled'}>Resend Invite</button>
+            ${admin.isActive
+              ? `<button class="mini-btn warn" data-action="deactivate" data-id="${admin.id}">Deactivate</button>`
+              : `<button class="mini-btn" data-action="reactivate" data-id="${admin.id}">Reactivate</button>`}
+          </div>
+        `;
+        adminList.appendChild(card);
+      });
+    }
+
+    async function fetchBranches(){
+      const data = await api('/admin/branches');
+      state.branches = Array.isArray(data.branches) ? data.branches : [];
+      inviteBranch.innerHTML = branchOptions('');
+    }
+
+    async function fetchAdmins(){
+      const data = await api('/admin/admin-users');
+      state.admins = Array.isArray(data.admins) ? data.admins : [];
+      renderAdmins();
+    }
+
+    async function refreshAll(){
+      await Promise.all([fetchBranches(), fetchAdmins()]);
+    }
+
+    async function sendInvite(){
+      const pastorName = String(inviteName.value || '').trim();
+      const email = String(inviteEmail.value || '').trim();
+      const branch = String(inviteBranch.value || '').trim();
+      if (!pastorName || !email || !branch) { setStatus('Pastor name, email, and branch are required.'); return; }
+      setStatus('Assigning pastor...');
+      try {
+        const data = await api('/admin/admin-invites', { method: 'POST', body: JSON.stringify({ pastorName, email, branch }) });
+        inviteName.value = '';
+        inviteEmail.value = '';
+        inviteBranch.value = '';
+        setStatus(data.warning || 'Pastor assignment invite sent.');
+        fetchAdmins();
+      } catch (error) {
+        setStatus(error.message || 'Failed to assign pastor.');
+      }
+    }
+
+    async function handleAction(action, id, branchValue){
+      const actions = {
+        deactivate: { url: `/admin/admin-users/${id}/deactivate`, method: 'POST', body: null, msg: 'Admin deactivated.' },
+        reactivate: { url: `/admin/admin-users/${id}/reactivate`, method: 'POST', body: null, msg: 'Admin reactivated.' },
+        reset: { url: `/admin/admin-users/${id}/reset-password`, method: 'POST', body: null, msg: 'Reset link sent.' },
+        resend: { url: `/admin/admin-invites/${id}/resend`, method: 'POST', body: null, msg: 'Invite resent.' },
+        reassign: { url: `/admin/admin-users/${id}/reassign-branch`, method: 'POST', body: JSON.stringify({ branch: branchValue }), msg: 'Branch reassigned.' }
+      };
+      const cfg = actions[action];
+      if (!cfg) return;
+      if (action === 'reassign' && !String(branchValue || '').trim()) {
+        setStatus('Select a branch before reassign.');
+        return;
+      }
+      setStatus('Processing...');
+      try {
+        await api(cfg.url, { method: cfg.method, body: cfg.body || undefined });
+        setStatus(cfg.msg);
+        fetchAdmins();
+      } catch (error) {
+        setStatus(error.message || 'Action failed.');
+      }
+    }
+
+    sendInviteBtn.addEventListener('click', sendInvite);
+    adminList.addEventListener('click', (event)=>{
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const action = target.getAttribute('data-action');
+      const id = target.getAttribute('data-id');
+      if (!action || !id) return;
+      let branchValue = '';
+      if (action === 'reassign') {
+        const select = adminList.querySelector(`select[data-branch-input="${id}"]`);
+        branchValue = select instanceof HTMLSelectElement ? select.value : '';
+      }
+      handleAction(action, id, branchValue);
+    });
+
+    refreshAll().catch((error)=>setStatus(error.message || 'Failed to load data.'));
+    window.setInterval(refreshAll, 30000);
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
+import Constants from 'expo-constants';
 
 const DEVICE_FINGERPRINT_KEY = 'device_fingerprint';
 const DEFAULT_API_PORT = '3001';
@@ -9,17 +10,43 @@ function isTunnelHost(hostname: string): boolean {
     return hostname.endsWith('.exp.direct') || hostname.includes('exp.host') || hostname.endsWith('.expo.dev');
 }
 
+function pickHostFromUri(raw: unknown): string | null {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+
+    const trimmed = raw.trim();
+    try {
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('exp://')) {
+            return new URL(trimmed).hostname || null;
+        }
+    } catch {
+        // Continue with host:port parsing fallback.
+    }
+
+    return trimmed.split(':')[0] || null;
+}
+
 function resolveBaseUrl() {
     const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
     if (envUrl) {
         return envUrl;
     }
 
+    const expoHostCandidates = [
+        pickHostFromUri((Constants as any)?.expoConfig?.hostUri),
+        pickHostFromUri((Constants as any)?.manifest?.debuggerHost),
+        pickHostFromUri((Constants as any)?.manifest2?.extra?.expoClient?.hostUri),
+    ].filter(Boolean) as string[];
+
+    const preferredExpoHost = expoHostCandidates.find((host) => !isTunnelHost(host));
+    if (preferredExpoHost) {
+        return `http://${preferredExpoHost}:${DEFAULT_API_PORT}`;
+    }
+
     const scriptURL = (NativeModules as any)?.SourceCode?.scriptURL;
     if (scriptURL) {
         try {
             const metroHost = new URL(scriptURL).hostname;
-            if (metroHost && !isTunnelHost(metroHost)) {
+            if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1' && !isTunnelHost(metroHost)) {
                 return `http://${metroHost}:${DEFAULT_API_PORT}`;
             }
         } catch {
@@ -32,6 +59,9 @@ function resolveBaseUrl() {
 }
 
 const BASE_URL = resolveBaseUrl();
+if (__DEV__) {
+    console.log(`[API] BASE_URL=${BASE_URL}`);
+}
 
 const client = axios.create({
     baseURL: BASE_URL,

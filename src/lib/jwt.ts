@@ -7,6 +7,7 @@ export interface JWTPayload {
     userId: string;
     phone: string;
     role: string;
+    tokenVersion?: number;
 }
 
 export function generateToken(payload: JWTPayload): string {

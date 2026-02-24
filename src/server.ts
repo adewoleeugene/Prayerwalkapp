@@ -7,7 +7,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
-import { prisma, createPoint } from './lib/db';
+import { prisma, createPoint, executeRawQuery } from './lib/db';
 import { verifyToken } from './lib/auth';
 import { ensureGuestUser } from './lib/guestAuth';
 import authRoutes from './routes/auth';
@@ -77,7 +77,7 @@ app.get('/admin', (req, res) => {
 });
 
 app.get('/superadmin', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public', 'superadmin-login.html'));
+  res.redirect('/admin');
 });
 
 app.use('/auth', authRoutes);
@@ -122,22 +122,38 @@ server.on('upgrade', (request, socket, head) => {
       return;
     }
 
-    try {
-      const payload = verifyToken(token);
-      if (!payload) {
+    void (async () => {
+      try {
+        const payload = verifyToken(token);
+        if (!payload) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        const users = await executeRawQuery<Array<{ id: string; is_active: boolean; token_version: number | null }>>(
+          `SELECT id, is_active, COALESCE(token_version, 0) AS token_version
+           FROM users
+           WHERE id = $1::uuid
+           LIMIT 1`,
+          [payload.userId]
+        );
+        const user = users[0];
+        if (!user || !user.is_active || Number(user.token_version ?? 0) !== Number(payload.tokenVersion ?? 0)) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit('connection', ws, request, payload.userId);
+        });
+      } catch (e) {
+        console.error("WS Auth Error", e);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
-        return;
       }
-
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request, payload.userId);
-      });
-    } catch (e) {
-      console.error("WS Auth Error", e);
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-    }
+    })();
   } else {
     socket.destroy();
   }

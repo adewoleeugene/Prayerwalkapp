@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Settings</title>
+  <style>
+    :root {
+      --bg: #eef2f8;
+      --panel: #ffffff;
+      --border: #d6dfec;
+      --text: #11233f;
+      --muted: #5c6d89;
+      --primary: #1f66ff;
+      --danger: #d94848;
+      --sidebar: #0e1d36;
+      --sidebar-muted: #a7b6d4;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f5f8ff 0%, #e8eef7 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--sidebar);
+      color: #fff;
+      padding: 28px 18px;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .brand {
+      margin: 0 0 18px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .sidebar-subtitle {
+      margin: 0 0 24px;
+      color: var(--sidebar-muted);
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }
+
+    .nav {
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav a {
+      color: #e4ecfb;
+      text-decoration: none;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+
+    .nav a.active {
+      background: #1a4db8;
+      border-color: #2e65d6;
+    }
+
+    .sidebar-footer {
+      margin-top: 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      padding: 11px 13px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .btn.primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .btn.danger {
+      background: #fff0f0;
+      color: var(--danger);
+      border-color: #f2bcbc;
+    }
+
+    .content {
+      padding: 26px;
+      max-width: 960px;
+      width: 100%;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 10px 22px rgba(25, 45, 84, 0.08);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      line-height: 1.15;
+    }
+
+    .muted {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .grid {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .kv {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #f6f9ff;
+      padding: 10px;
+    }
+
+    .kv-label {
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 5px;
+    }
+
+    .kv-value {
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    form {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-weight: 700;
+      font-size: 0.93rem;
+    }
+
+    input {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 1rem;
+      color: var(--text);
+    }
+
+    input:focus {
+      outline: 2px solid #8fb3ff;
+      outline-offset: 1px;
+      border-color: #86a9ef;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .status {
+      margin-top: 8px;
+      font-weight: 700;
+      min-height: 20px;
+    }
+
+    .status.error { color: var(--danger); }
+    .status.success { color: #1b8a4a; }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.87rem;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+      .content { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="layout">
+    <aside class="sidebar">
+      <h2 class="brand">Admin Settings</h2>
+      <p class="sidebar-subtitle">Manage your account security and session preferences.</p>
+
+      <nav class="nav">
+        <a href="/admin.html" id="dashboardLink">Back to Dashboard</a>
+        <a href="#account" class="active">Account</a>
+        <a href="#security">Security</a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="logoutBtn" class="btn danger" type="button">Log Out</button>
+      </div>
+    </aside>
+
+    <section class="content">
+      <article id="account" class="panel">
+        <h1>Account Settings</h1>
+        <p class="muted">Your admin identity details.</p>
+        <div class="grid">
+          <div class="kv">
+            <div class="kv-label">Name</div>
+            <div id="nameValue" class="kv-value">-</div>
+          </div>
+          <div class="kv">
+            <div class="kv-label">Email</div>
+            <div id="emailValue" class="kv-value">-</div>
+          </div>
+          <div class="kv">
+            <div class="kv-label">Role</div>
+            <div id="roleValue" class="kv-value">-</div>
+          </div>
+          <div class="kv">
+            <div class="kv-label">Branch</div>
+            <div id="branchValue" class="kv-value">-</div>
+          </div>
+          <div class="kv">
+            <div class="kv-label">Last Login</div>
+            <div id="lastLoginValue" class="kv-value">-</div>
+          </div>
+        </div>
+      </article>
+
+      <article id="security" class="panel">
+        <h1>Security</h1>
+        <p class="muted">Change your password. This signs out other active sessions.</p>
+        <form id="passwordForm">
+          <label>
+            Current password
+            <input id="currentPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <label>
+            New password
+            <input id="newPassword" type="password" autocomplete="new-password" required />
+          </label>
+          <label>
+            Confirm new password
+            <input id="confirmPassword" type="password" autocomplete="new-password" required />
+          </label>
+          <div class="small">Password must be at least 8 characters and include uppercase, lowercase, and a number.</div>
+          <div class="row">
+            <button id="savePasswordBtn" type="submit" class="btn primary">Update Password</button>
+            <button id="clearBtn" type="button" class="btn">Clear</button>
+          </div>
+          <div id="statusText" class="status"></div>
+        </form>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('token');
+    if (tokenFromQuery) {
+      localStorage.setItem('adminToken', tokenFromQuery);
+      params.delete('token');
+      const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+
+    const authToken = localStorage.getItem('adminToken') || '';
+    if (!authToken) {
+      window.location.replace('/admin-login.html');
+    }
+
+    const statusText = document.getElementById('statusText');
+    const passwordForm = document.getElementById('passwordForm');
+    const savePasswordBtn = document.getElementById('savePasswordBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const dashboardLink = document.getElementById('dashboardLink');
+
+    function showStatus(text, type = '') {
+      statusText.textContent = text || '';
+      statusText.className = `status ${type}`.trim();
+    }
+
+    function logout() {
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUserRole');
+      window.location.replace('/admin-login.html');
+    }
+
+    async function fetchMe() {
+      const res = await fetch('/admin/me', {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return null;
+        }
+        throw new Error(data.error || 'Failed to load profile');
+      }
+      return data.profile;
+    }
+
+    function formatDate(value) {
+      if (!value) return 'Never';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return 'Never';
+      return d.toLocaleString();
+    }
+
+    async function loadProfile() {
+      try {
+        const profile = await fetchMe();
+        if (!profile) return;
+        localStorage.setItem('adminUserRole', String(profile.role || '').toLowerCase());
+        if (dashboardLink) {
+          dashboardLink.setAttribute('href', String(profile.role || '').toLowerCase() === 'superadmin'
+            ? '/superadmin.html'
+            : '/admin.html'
+          );
+        }
+        document.getElementById('nameValue').textContent = profile.name || '-';
+        document.getElementById('emailValue').textContent = profile.email || '-';
+        document.getElementById('roleValue').textContent = profile.role || '-';
+        document.getElementById('branchValue').textContent = profile.branch || 'Unassigned';
+        document.getElementById('lastLoginValue').textContent = formatDate(profile.lastLoginAt);
+      } catch (error) {
+        showStatus(error.message || 'Failed to load profile', 'error');
+      }
+    }
+
+    passwordForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      showStatus('');
+      const currentPassword = document.getElementById('currentPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        showStatus('All password fields are required.', 'error');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showStatus('New password and confirm password do not match.', 'error');
+        return;
+      }
+
+      savePasswordBtn.disabled = true;
+      savePasswordBtn.textContent = 'Updating...';
+
+      try {
+        const res = await fetch('/admin/change-password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to update password');
+        }
+
+        showStatus('Password changed successfully. Redirecting to login...', 'success');
+        window.setTimeout(() => logout(), 900);
+      } catch (error) {
+        showStatus(error.message || 'Failed to update password', 'error');
+      } finally {
+        savePasswordBtn.disabled = false;
+        savePasswordBtn.textContent = 'Update Password';
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      passwordForm.reset();
+      showStatus('');
+    });
+
+    logoutBtn.addEventListener('click', logout);
+    loadProfile();
+  </script>
+</body>
+</html>

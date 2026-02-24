@@ -22,12 +22,13 @@
       <h1>Superadmin Login</h1>
       <p>Overseer access</p>
       <form id="loginForm">
-        <label for="email">Username (email)</label>
-        <input id="email" name="email" type="email" required autocomplete="username" />
+        <label for="username">Username (email)</label>
+        <input id="username" name="username" type="email" required autocomplete="username" value="admin@admin.com" />
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" required autocomplete="current-password" />
+        <input id="password" name="password" type="password" required autocomplete="current-password" value="admin" />
         <button type="submit">Login</button>
       </form>
+      <p style="margin:10px 0 0; font-size:0.9rem;"><a href="/admin-forgot-password.html">Forgot password?</a></p>
       <div class="error" id="error"></div>
     </section>
   </main>
@@ -39,14 +40,14 @@
       e.preventDefault();
       errorEl.textContent = '';
 
-      const email = document.getElementById('email').value.trim();
+      const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
 
       try {
-        const res = await fetch('/auth/login', {
+        const res = await fetch('/auth/superadmin-quick-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ username, password })
         });
         const data = await res.json();
 
@@ -63,7 +64,7 @@
         localStorage.setItem('adminToken', data.token);
         localStorage.setItem('adminUserRole', data.user.role || '');
         localStorage.setItem('adminUserEmail', data.user.email || '');
-        window.location.href = '/admin.html';
+        window.location.href = '/superadmin.html?v=superadmin-20260224';
       } catch (err) {
         errorEl.textContent = 'Network error. Try again.';
       }

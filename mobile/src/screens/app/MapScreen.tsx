@@ -8,15 +8,13 @@ import { api } from '../../api/client';
 
 const { width, height } = Dimensions.get('window');
 const BRANCHES_CACHE_KEY = 'branches_cache_v1';
+const ACTIVE_WALK_CACHE_KEY = 'active_walk_state_v1';
 
 type WalkTypeFilter = 'all' | 'path' | 'area';
 
 type WalkHistoryItem = {
     sessionId: string;
     userId: string;
-    who?: { id: string; name: string | null; email: string };
-    walkerDisplayName?: string;
-    participantNames?: string[];
     walkType: WalkTypeFilter;
     geometryType: 'path' | 'spot';
     routeQuality: 'high' | 'medium' | 'low';
@@ -37,6 +35,7 @@ type WalkHistoryItem = {
 
 export default function MapScreen() {
     const mapRef = useRef<MapView | null>(null);
+    const locationSubscription = useRef<Location.LocationSubscription | null>(null);
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [locations, setLocations] = useState<any[]>([]);
     const [walkHistory, setWalkHistory] = useState<WalkHistoryItem[]>([]);
@@ -70,9 +69,11 @@ export default function MapScreen() {
         startedAt: string;
     } | null>(null);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
     const [endWalkModalVisible, setEndWalkModalVisible] = useState(false);
     const [walkJourney, setWalkJourney] = useState('');
     const [isEndingWalk, setIsEndingWalk] = useState(false);
+    const [activeRoutePoints, setActiveRoutePoints] = useState<Array<{ latitude: number; longitude: number }>>([]);
 
     const parseParticipantsLike = (participantsLike: unknown): string[] => {
         if (!participantsLike) return [];
@@ -97,6 +98,22 @@ export default function MapScreen() {
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         const seconds = totalSeconds % 60;
         return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
+    };
+
+    const calculateDistanceMeters = (
+        a: { latitude: number; longitude: number },
+        b: { latitude: number; longitude: number }
+    ) => {
+        const toRad = (deg: number) => (deg * Math.PI) / 180;
+        const R = 6371e3;
+        const dLat = toRad(b.latitude - a.latitude);
+        const dLng = toRad(b.longitude - a.longitude);
+        const lat1 = toRad(a.latitude);
+        const lat2 = toRad(b.latitude);
+        const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+        return R * c;
     };
 
     const applyBranchState = (names: string[]) => {
@@ -155,8 +172,10 @@ export default function MapScreen() {
     useEffect(() => {
         if (!activeWalk) {
             setElapsedSeconds(0);
+            setStoppedElapsedSeconds(null);
             return;
         }
+        if (stoppedElapsedSeconds !== null) return;
         const startedAtMs = new Date(activeWalk.startedAt).getTime();
         const tick = () => {
             const nowMs = Date.now();
@@ -166,6 +185,82 @@ export default function MapScreen() {
         tick();
         const interval = setInterval(tick, 1000);
         return () => clearInterval(interval);
+    }, [activeWalk, stoppedElapsedSeconds]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const stopTracking = () => {
+            if (locationSubscription.current) {
+                locationSubscription.current.remove();
+                locationSubscription.current = null;
+            }
+        };
+
+        const startTracking = async () => {
+            if (!activeWalk) {
+                stopTracking();
+                setActiveRoutePoints([]);
+                return;
+            }
+
+            if (location?.coords) {
+                setActiveRoutePoints([{ latitude: location.coords.latitude, longitude: location.coords.longitude }]);
+                mapRef.current?.animateToRegion(
+                    {
+                        latitude: location.coords.latitude,
+                        longitude: location.coords.longitude,
+                        latitudeDelta: 0.008,
+                        longitudeDelta: 0.008,
+                    },
+                    250
+                );
+            } else {
+                setActiveRoutePoints([]);
+            }
+
+            stopTracking();
+            const sub = await Location.watchPositionAsync(
+                {
+                    accuracy: Location.Accuracy.BestForNavigation,
+                    timeInterval: 2000,
+                    distanceInterval: 3,
+                },
+                (loc) => {
+                    if (cancelled) return;
+                    setLocation(loc);
+                    const nextPoint = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+                    setActiveRoutePoints((prev) => {
+                        if (prev.length === 0) return [nextPoint];
+                        const last = prev[prev.length - 1];
+                        if (calculateDistanceMeters(last, nextPoint) < 2) return prev;
+                        return [...prev, nextPoint];
+                    });
+                    mapRef.current?.animateToRegion(
+                        {
+                            latitude: loc.coords.latitude,
+                            longitude: loc.coords.longitude,
+                            latitudeDelta: 0.01,
+                            longitudeDelta: 0.01,
+                        },
+                        400
+                    );
+                }
+            );
+
+            if (!cancelled) {
+                locationSubscription.current = sub;
+            } else {
+                sub.remove();
+            }
+        };
+
+        startTracking();
+
+        return () => {
+            cancelled = true;
+            stopTracking();
+        };
     }, [activeWalk]);
 
     useEffect(() => {
@@ -177,6 +272,27 @@ export default function MapScreen() {
                 await AsyncStorage.setItem('device_fingerprint', fp);
             }
             setFingerprint(fp);
+
+            // Restore active walk state after app refresh/restart.
+            try {
+                const cachedActiveWalk = await AsyncStorage.getItem(ACTIVE_WALK_CACHE_KEY);
+                if (cachedActiveWalk) {
+                    const parsed = JSON.parse(cachedActiveWalk);
+                    if (parsed?.sessionId && parsed?.startedAt) {
+                        setActiveWalk({
+                            sessionId: String(parsed.sessionId),
+                            targetLocation: parsed.targetLocation || null,
+                            branch: String(parsed.branch || 'International'),
+                            participants: Array.isArray(parsed.participants)
+                                ? parsed.participants.map((p: any) => String(p))
+                                : [],
+                            startedAt: String(parsed.startedAt),
+                        });
+                    }
+                }
+            } catch (e) {
+                console.log('Active walk cache error', e);
+            }
 
             // Hydrate branches from cache immediately for offline/slow network cases.
             try {
@@ -251,6 +367,7 @@ export default function MapScreen() {
     }, [daysFilter]);
 
     useEffect(() => {
+        if (activeWalk) return;
         if (!mapRef.current || walkHistory.length === 0 || hasFocusedHistory.current) return;
 
         const historyPoints = walkHistory.flatMap((walk) =>
@@ -275,7 +392,7 @@ export default function MapScreen() {
                 animated: true
             });
         }, 500);
-    }, [walkHistory, location]);
+    }, [walkHistory, location, activeWalk]);
 
     const fetchNearbyLocations = async (lat: number, lng: number) => {
         try {
@@ -329,9 +446,6 @@ export default function MapScreen() {
                 .map((item) => ({
                     sessionId: String(item.sessionId),
                     userId: String(item.userId || ''),
-                    who: item.who,
-                    walkerDisplayName: item.walkerDisplayName ? String(item.walkerDisplayName) : undefined,
-                    participantNames: Array.isArray(item.participantNames) ? item.participantNames.map((n: any) => String(n)) : [],
                     walkType: (item.walkType === 'area' ? 'area' : 'path') as WalkTypeFilter,
                     geometryType: (item.geometryType === 'spot' ? 'spot' : 'path') as 'path' | 'spot',
                     routeQuality: (item.routeQuality === 'high' || item.routeQuality === 'low' ? item.routeQuality : 'medium') as 'high' | 'medium' | 'low',
@@ -461,13 +575,15 @@ export default function MapScreen() {
             if (res.data.success) {
                 const session = res.data.session;
                 const parsedParticipants = parseParticipantsLike(session?.participants || participantsForStart);
-                setActiveWalk({
+                const nextActiveWalk = {
                     sessionId: String(session?.id),
                     targetLocation: targetLocation || null,
                     branch: String(session?.branch || startBranch || 'International'),
                     participants: parsedParticipants,
                     startedAt: String(session?.startTime || new Date().toISOString()),
-                });
+                };
+                setActiveWalk(nextActiveWalk);
+                await AsyncStorage.setItem(ACTIVE_WALK_CACHE_KEY, JSON.stringify(nextActiveWalk));
                 fetchWalkHistory();
             } else {
                 Alert.alert('Error', res.data.error || 'Could not start walk');
@@ -482,14 +598,6 @@ export default function MapScreen() {
     const openHistoryDetails = (walk: WalkHistoryItem) => {
         setSelectedHistoryWalk(walk);
         setHistorySheetVisible(true);
-    };
-
-    const replayWalk = (walk: WalkHistoryItem) => {
-        if (!mapRef.current || walk.points.length < 2) return;
-        mapRef.current.fitToCoordinates(walk.points, {
-            edgePadding: { top: 120, right: 60, bottom: 260, left: 60 },
-            animated: true,
-        });
     };
 
     const toDurationLabel = (seconds: number) => {
@@ -509,7 +617,7 @@ export default function MapScreen() {
         const start = walk.startLocationName?.trim();
         const end = walk.endLocationName?.trim();
         if (start && end) return start === end ? start : `${start} → ${end}`;
-        return end || start || walk.prayerFocus || 'Prayer walk';
+        return end || start || 'Prayer walk';
     };
 
     const recenterToCurrentLocation = async () => {
@@ -571,8 +679,15 @@ export default function MapScreen() {
 
             setEndWalkModalVisible(false);
             setWalkJourney('');
+            if (locationSubscription.current) {
+                locationSubscription.current.remove();
+                locationSubscription.current = null;
+            }
+            setActiveRoutePoints([]);
             setActiveWalk(null);
             setElapsedSeconds(0);
+            setStoppedElapsedSeconds(null);
+            await AsyncStorage.removeItem(ACTIVE_WALK_CACHE_KEY);
             fetchWalkHistory();
             Alert.alert('Walk Ended', 'Your walk has been completed.');
         } catch (e: any) {
@@ -597,8 +712,18 @@ export default function MapScreen() {
                     }}
                     showsUserLocation={true}
                     showsMyLocationButton={false}
-                    followsUserLocation={true}
+                    followsUserLocation={!!activeWalk}
                 >
+                    {activeWalk && activeRoutePoints.length > 1 && (
+                        <Polyline
+                            coordinates={activeRoutePoints}
+                            strokeColor="rgba(37, 99, 235, 0.92)"
+                            strokeWidth={6}
+                            geodesic
+                            lineCap="round"
+                            lineJoin="round"
+                        />
+                    )}
                     {walkHistory.map((walk) => {
                         const strokeOpacity = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
                         const strokeColor = walk.walkType === 'area'
@@ -621,7 +746,6 @@ export default function MapScreen() {
                                     <Marker
                                         coordinate={walk.points[walk.points.length - 1]}
                                         title={toHistoryLabel(walk)}
-                                        description={(walk.walkerDisplayName || walk.who?.name) ? `By ${walk.walkerDisplayName || walk.who?.name}` : undefined}
                                         pinColor={walk.walkType === 'area' ? '#1C7ED6' : '#E03131'}
                                         onPress={() => openHistoryDetails(walk)}
                                     />
@@ -636,7 +760,6 @@ export default function MapScreen() {
                                 key={`spot-${walk.sessionId}`}
                                 coordinate={first}
                                 title={toHistoryLabel(walk)}
-                                description={(walk.walkerDisplayName || walk.who?.name) ? `By ${walk.walkerDisplayName || walk.who?.name}` : undefined}
                                 pinColor={walk.walkType === 'area' ? '#1C7ED6' : '#E8590C'}
                                 onPress={() => openHistoryDetails(walk)}
                             />
@@ -709,13 +832,14 @@ export default function MapScreen() {
                     <LocateFixed size={22} color="#3B82F6" strokeWidth={2.25} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={styles.fabStartButton}
-                    onPress={() => openStartDrawer()}
-                    disabled={!!activeWalk}
-                >
-                    <Text style={styles.fabStartText}>{activeWalk ? 'Walk In Progress' : 'Start Prayer Walk'}</Text>
-                </TouchableOpacity>
+                {!activeWalk && (
+                    <TouchableOpacity
+                        style={styles.fabStartButton}
+                        onPress={() => openStartDrawer()}
+                    >
+                        <Text style={styles.fabStartText}>Start Prayer Walk</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Bottom Drawer */}
@@ -797,7 +921,7 @@ export default function MapScreen() {
                 <View style={styles.activeWalkDrawer}>
                     <View style={styles.activeWalkHeader}>
                         <Text style={styles.activeWalkTitle}>Walk in Progress</Text>
-                        <Text style={styles.activeWalkTimer}>{formatDuration(elapsedSeconds)}</Text>
+                        <Text style={styles.activeWalkTimer}>{formatDuration(stoppedElapsedSeconds ?? elapsedSeconds)}</Text>
                     </View>
 
                     {activeWalk.participants.length > 0 && (
@@ -815,7 +939,10 @@ export default function MapScreen() {
 
                     <TouchableOpacity
                         style={styles.endWalkButton}
-                        onPress={() => setEndWalkModalVisible(true)}
+                        onPress={() => {
+                            setStoppedElapsedSeconds(elapsedSeconds);
+                            setEndWalkModalVisible(true);
+                        }}
                         disabled={isEndingWalk}
                     >
                         <Text style={styles.endWalkButtonText}>End Walk</Text>
@@ -862,7 +989,7 @@ export default function MapScreen() {
                 transparent={true}
                 visible={endWalkModalVisible}
                 animationType="fade"
-                onRequestClose={() => !isEndingWalk && setEndWalkModalVisible(false)}
+                onRequestClose={() => { }}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.endModalContent}>
@@ -908,11 +1035,9 @@ export default function MapScreen() {
                         <View style={styles.drawerHandle} />
                         <Text style={styles.historyTitle}>{toHistoryLabel(selectedHistoryWalk)}</Text>
                         <Text style={styles.historyMetaText}>
-                            {selectedHistoryWalk.walkerDisplayName || selectedHistoryWalk.who?.name || 'Unknown walker'} • {new Date(selectedHistoryWalk.startedAt).toLocaleString()}
+                            {new Date(selectedHistoryWalk.startedAt).toLocaleString()}
                         </Text>
-                        <Text style={styles.historyMetaText}>
-                            Duration {toDurationLabel(selectedHistoryWalk.durationSeconds)} • Distance {toDistanceLabel(selectedHistoryWalk.distanceMeters)}
-                        </Text>
+                        <Text style={styles.historyMetaText}>Duration {toDurationLabel(selectedHistoryWalk.durationSeconds)} • Distance {toDistanceLabel(selectedHistoryWalk.distanceMeters)}</Text>
                         <Text style={styles.historyMetaText}>Branch {selectedHistoryWalk.branch}</Text>
                         {!!selectedHistoryWalk.prayerSummary && (
                             <View style={styles.historySummaryBox}>
@@ -927,11 +1052,6 @@ export default function MapScreen() {
                             </View>
                         )}
                         <View style={styles.historyActionRow}>
-                            {selectedHistoryWalk.geometryType === 'path' && selectedHistoryWalk.points.length > 1 ? (
-                                <TouchableOpacity style={styles.historyActionButton} onPress={() => replayWalk(selectedHistoryWalk)}>
-                                    <Text style={styles.historyActionText}>Replay</Text>
-                                </TouchableOpacity>
-                            ) : null}
                             <TouchableOpacity style={styles.historyCloseButton} onPress={() => setHistorySheetVisible(false)}>
                                 <Text style={styles.historyCloseText}>Close</Text>
                             </TouchableOpacity>
@@ -1064,14 +1184,16 @@ const styles = StyleSheet.create({
     },
     activeWalkDrawer: {
         position: 'absolute',
-        left: 12,
-        right: 12,
-        bottom: 114,
+        left: 0,
+        right: 0,
+        bottom: 0,
         backgroundColor: '#FFFFFF',
-        borderRadius: 18,
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
         borderWidth: 1,
         borderColor: '#D9E3F0',
         padding: 14,
+        paddingBottom: 28,
         elevation: 12,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 3 },
@@ -1395,8 +1517,6 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     historyActionRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
         marginTop: 14,
     },
     historyActionButton: {
@@ -1412,14 +1532,15 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     historyCloseButton: {
-        width: 94,
-        backgroundColor: '#E9ECEF',
+        width: '100%',
+        backgroundColor: '#2563EB',
         borderRadius: 10,
+        paddingVertical: 12,
         justifyContent: 'center',
         alignItems: 'center',
     },
     historyCloseText: {
-        color: '#111827',
+        color: '#FFFFFF',
         fontWeight: '700',
     },
 });

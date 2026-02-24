@@ -75,6 +75,31 @@
       justify-items: stretch;
     }
 
+    .header-controls {
+      display: flex;
+      gap: 8px;
+      margin-left: 12px;
+      align-items: center;
+    }
+
+    .header-btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .header-btn.danger {
+      border-color: #f2bcbc;
+      color: #ab2f2f;
+      background: #fff5f5;
+    }
+
     .stat {
       border: 1px solid var(--border);
       border-radius: 16px;
@@ -105,14 +130,6 @@
       gap: 8px;
       flex-wrap: wrap;
       margin-bottom: 12px;
-    }
-
-    .filter-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr auto auto;
-      gap: 8px;
-      margin-bottom: 12px;
-      align-items: center;
     }
 
     .chip {
@@ -168,6 +185,19 @@
       font-size: 0.92rem;
     }
 
+    .pin-count-badge {
+      background: #1f66ff;
+      color: #fff;
+      border: 1px solid #ffffff;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1;
+      padding: 3px 6px;
+      box-shadow: 0 2px 8px rgba(17, 36, 66, 0.2);
+      white-space: nowrap;
+    }
+
     .right {
       padding: 16px;
       display: flex;
@@ -180,6 +210,35 @@
       margin: 0;
       font-size: 2rem;
       line-height: 1.1;
+    }
+
+    .history-search {
+      margin-top: 10px;
+      margin-bottom: 8px;
+      width: 100%;
+      padding-right: 38px;
+    }
+
+    .history-search-wrap {
+      position: relative;
+    }
+
+    .history-filter-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+
+    .history-search-icon {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+      font-size: 0.95rem;
     }
 
     .history-list {
@@ -335,6 +394,86 @@
       font-size: 0.95rem;
     }
 
+    .superadmin-panel {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #f7faff;
+      padding: 12px;
+      display: none;
+    }
+
+    .superadmin-panel.show {
+      display: block;
+    }
+
+    .superadmin-panel h3 {
+      margin: 0 0 8px;
+      font-size: 1.06rem;
+    }
+
+    .superadmin-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .admin-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 270px;
+      overflow: auto;
+    }
+
+    .admin-item {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 10px;
+      padding: 8px;
+    }
+
+    .admin-meta {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .admin-actions {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .mini-input {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      min-width: 140px;
+      font-size: 0.84rem;
+    }
+
+    .mini-btn {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .mini-btn.warn {
+      background: #ffe8e8;
+      border-color: #ffb3b3;
+      color: #9d2020;
+    }
+
     @media (max-width: 1180px) {
       .shell {
         grid-template-columns: 1fr;
@@ -358,7 +497,7 @@
         max-height: 450px;
       }
 
-      .filter-grid {
+      .history-filter-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -382,6 +521,10 @@
           <div id="statDistance" class="stat-value">0 km</div>
         </article>
       </div>
+      <div class="header-controls">
+        <a class="header-btn" href="/admin-settings.html" id="settingsLink">Settings</a>
+        <button class="header-btn danger" id="logoutBtn" type="button">Log Out</button>
+      </div>
     </header>
 
     <section class="panel left">
@@ -390,15 +533,6 @@
         <button class="chip active" data-days="7">7 days</button>
         <button class="chip" data-days="30">30 days</button>
       </div>
-      <div class="filter-grid">
-        <select id="branchFilter" class="chip-select" aria-label="Branch filter">
-          <option value="">Any branch</option>
-        </select>
-        <input id="startDateTime" class="chip-input" type="datetime-local" aria-label="Start date and time" />
-        <input id="endDateTime" class="chip-input" type="datetime-local" aria-label="End date and time" />
-        <button id="applyFilterBtn" class="chip">Apply</button>
-        <button id="allWalksBtn" class="chip">All Walks</button>
-      </div>
       <div id="map"></div>
       <p class="legend">Heavier walked paths show stronger opacity. Tap route/area for details.</p>
       <p id="statusText" class="status"></p>
@@ -406,6 +540,18 @@
 
     <section class="panel right">
       <h2>Walk History</h2>
+      <div class="history-search-wrap">
+        <input id="searchQuery" class="chip-input history-search" type="search" aria-label="Search walks" placeholder="Search name, location, branch..." />
+        <span class="history-search-icon" aria-hidden="true">&#128269;</span>
+      </div>
+      <div class="history-filter-grid">
+        <select id="branchFilter" class="chip-select" aria-label="Branch filter">
+          <option value="">Any branch</option>
+        </select>
+        <input id="startDateTime" class="chip-input" type="datetime-local" aria-label="Start date and time" />
+        <input id="endDateTime" class="chip-input" type="datetime-local" aria-label="End date and time" />
+        <button id="clearFiltersBtn" class="chip">Clear</button>
+      </div>
       <div id="historyList" class="history-list"></div>
       <div id="historyPager" class="history-pager"></div>
       <p id="emptyState" class="empty" style="display:none;">No prayer walks in this filter.</p>
@@ -425,6 +571,17 @@
           <button id="actionSecondary" class="btn ghost">Close</button>
         </div>
       </article>
+
+      <section id="superadminPanel" class="superadmin-panel">
+        <h3>Superadmin Branch Admin Control</h3>
+        <div class="superadmin-grid">
+          <input id="inviteEmail" class="chip-input" type="email" placeholder="Pastor email" aria-label="Pastor email" />
+          <input id="inviteBranch" class="chip-input" type="text" placeholder="Branch slug or name" aria-label="Branch" />
+          <button id="sendInviteBtn" class="chip">Send Invite</button>
+        </div>
+        <div id="superadminStatus" class="status"></div>
+        <div id="adminList" class="admin-list"></div>
+      </section>
     </section>
   </main>
 
@@ -441,6 +598,7 @@
       days: 7,
       rawWalks: [],
       walks: [],
+      filterQuery: '',
       filterBranch: '',
       filterStartAt: '',
       filterEndAt: '',
@@ -468,19 +626,46 @@
     if (!authToken) {
       window.location.replace('/admin');
     }
+    const existingRole = (localStorage.getItem('adminUserRole') || '').toLowerCase();
+    if (existingRole === 'superadmin') {
+      window.location.replace('/superadmin.html?v=superadmin-20260224');
+    }
 
+    const searchQuery = document.getElementById('searchQuery');
     const branchFilter = document.getElementById('branchFilter');
     const startDateTime = document.getElementById('startDateTime');
     const endDateTime = document.getElementById('endDateTime');
-    const applyFilterBtn = document.getElementById('applyFilterBtn');
-    const allWalksBtn = document.getElementById('allWalksBtn');
+    const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+    const settingsLink = document.getElementById('settingsLink');
+    const logoutBtn = document.getElementById('logoutBtn');
     const historyList = document.getElementById('historyList');
     const historyPager = document.getElementById('historyPager');
     const emptyState = document.getElementById('emptyState');
     const statusText = document.getElementById('statusText');
+    const adminRole = (localStorage.getItem('adminUserRole') || '').toLowerCase();
+    const isSuperadmin = adminRole === 'superadmin';
+    const superadminPanel = document.getElementById('superadminPanel');
+    const inviteEmail = document.getElementById('inviteEmail');
+    const inviteBranch = document.getElementById('inviteBranch');
+    const sendInviteBtn = document.getElementById('sendInviteBtn');
+    const superadminStatus = document.getElementById('superadminStatus');
+    const adminList = document.getElementById('adminList');
+    let searchDebounceTimer = null;
+    let superadminRefreshTimer = null;
 
     function setStatus(text) {
       statusText.textContent = text || '';
+    }
+
+    function setSuperadminStatus(text) {
+      if (!superadminStatus) return;
+      superadminStatus.textContent = text || '';
+    }
+
+    function logout() {
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUserRole');
+      window.location.replace('/admin-login.html');
     }
 
     function toDurationLabel(seconds) {
@@ -569,6 +754,102 @@
       };
     }
 
+    function toLatLngPoint(point) {
+      if (!point) return null;
+      const lat = Number(point.latitude);
+      const lng = Number(point.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { latitude: lat, longitude: lng };
+    }
+
+    function distanceMetersBetweenPoints(a, b) {
+      if (!a || !b) return Number.POSITIVE_INFINITY;
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const R = 6371e3;
+      const dLat = toRad(b.latitude - a.latitude);
+      const dLng = toRad(b.longitude - a.longitude);
+      const lat1 = toRad(a.latitude);
+      const lat2 = toRad(b.latitude);
+      const x =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+      return R * c;
+    }
+
+    function pointAtDistance(point, distanceMeters, bearingDegrees = 90) {
+      if (!point) return null;
+      const R = 6371e3;
+      const lat1 = (point.latitude * Math.PI) / 180;
+      const lng1 = (point.longitude * Math.PI) / 180;
+      const brng = (bearingDegrees * Math.PI) / 180;
+      const angDist = distanceMeters / R;
+
+      const lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(angDist) +
+        Math.cos(lat1) * Math.sin(angDist) * Math.cos(brng)
+      );
+      const lng2 = lng1 + Math.atan2(
+        Math.sin(brng) * Math.sin(angDist) * Math.cos(lat1),
+        Math.cos(angDist) - Math.sin(lat1) * Math.sin(lat2)
+      );
+
+      return {
+        latitude: (lat2 * 180) / Math.PI,
+        longitude: (lng2 * 180) / Math.PI
+      };
+    }
+
+    function getPinPointForWalk(walk) {
+      const points = Array.isArray(walk?.points) ? walk.points : [];
+      if (!points.length) return null;
+      if (walk.walkType === 'area') {
+        return toLatLngPoint(points[points.length - 1] || points[0]);
+      }
+      return toLatLngPoint(points[points.length - 1] || points[0]);
+    }
+
+    function buildRadiusClusters(walks, radiusMeters = 250) {
+      const refs = walks
+        .map((walk) => ({ sessionId: walk.sessionId, point: getPinPointForWalk(walk) }))
+        .filter((item) => !!item.point);
+
+      const clusters = [];
+      refs.forEach((ref) => {
+        let matched = null;
+        for (const cluster of clusters) {
+          if (distanceMetersBetweenPoints(cluster.center, ref.point) <= radiusMeters) {
+            matched = cluster;
+            break;
+          }
+        }
+
+        if (!matched) {
+          clusters.push({
+            center: { latitude: ref.point.latitude, longitude: ref.point.longitude },
+            members: [ref]
+          });
+          return;
+        }
+
+        matched.members.push(ref);
+        const total = matched.members.length;
+        const sum = matched.members.reduce(
+          (acc, member) => ({
+            latitude: acc.latitude + member.point.latitude,
+            longitude: acc.longitude + member.point.longitude
+          }),
+          { latitude: 0, longitude: 0 }
+        );
+        matched.center = {
+          latitude: sum.latitude / total,
+          longitude: sum.longitude / total
+        };
+      });
+
+      return clusters;
+    }
+
     function toHistoryLabel(walk) {
       const start = typeof walk?.startLocationName === 'string' ? walk.startLocationName.trim() : '';
       const end = typeof walk?.endLocationName === 'string' ? walk.endLocationName.trim() : '';
@@ -607,12 +888,16 @@
       ).sort((a, b) => a.localeCompare(b));
 
       const selected = state.filterBranch;
-      branchFilter.innerHTML = [
+      const options = [
         '<option value="">Any branch</option>',
         ...branches.map((name) => `<option value="${name}">${name}</option>`)
-      ].join('');
+      ];
+      if (selected && !branches.includes(selected)) {
+        options.push(`<option value="${selected}">${selected}</option>`);
+      }
+      branchFilter.innerHTML = options.join('');
 
-      if (selected && branches.includes(selected)) {
+      if (selected) {
         branchFilter.value = selected;
       } else {
         branchFilter.value = '';
@@ -621,19 +906,7 @@
     }
 
     function applyFiltersToRows(rows) {
-      const startTs = parseDateTimeLocalValue(state.filterStartAt);
-      const endTs = parseDateTimeLocalValue(state.filterEndAt);
-      const branch = String(state.filterBranch || '').trim();
-
-      return rows.filter((walk) => {
-        if (branch && String(walk.branch || '').trim() !== branch) return false;
-
-        const startedAtTs = new Date(walk.startedAt).getTime();
-        if (startTs !== null && startedAtTs < startTs) return false;
-        if (endTs !== null && startedAtTs > endTs) return false;
-
-        return true;
-      });
+      return rows;
     }
 
     function updateStats() {
@@ -674,6 +947,8 @@
 
       const bounds = [];
       const walksToRender = state.walks;
+      const radiusMeters = 250;
+      const radiusClusters = buildRadiusClusters(walksToRender, radiusMeters);
 
       walksToRender.forEach((walk) => {
         const points = (walk.points || []).map((p) => [Number(p.latitude), Number(p.longitude)]);
@@ -757,6 +1032,33 @@
             bounds.push(pinPoint);
           }
         }
+      });
+
+      radiusClusters.forEach((cluster) => {
+        const count = Math.max(1, cluster.members.length);
+        const center = cluster.center;
+        const badgePoint = pointAtDistance(center, radiusMeters, 45);
+        if (!badgePoint) return;
+
+        L.circle([center.latitude, center.longitude], {
+          radius: radiusMeters,
+          color: '#1f66ff',
+          weight: 1.5,
+          opacity: 0.35,
+          fillOpacity: 0.05,
+          interactive: false
+        }).addTo(layerGroup);
+
+        L.marker([badgePoint.latitude, badgePoint.longitude], {
+          icon: L.divIcon({
+            className: '',
+            html: `<span class="pin-count-badge">${count}</span>`,
+            iconSize: [28, 20],
+            iconAnchor: [14, 10]
+          }),
+          interactive: false,
+          keyboard: false
+        }).addTo(layerGroup);
       });
 
       if (!state.selected && state.suppressAutoFitOnce) {
@@ -937,12 +1239,31 @@
       setStatus('Loading walk history...');
 
       const makeUrl = () => {
+        const q = String(state.filterQuery || '').trim();
+        const requestLimit = q.length >= 2 ? '1000' : '300';
         const params = new URLSearchParams({
-          limit: '300',
+          limit: requestLimit,
           days: String(deriveFetchDaysFromFilters()),
           walkType: 'all',
           includeActive: 'true'
         });
+        if (q.length >= 2) {
+          params.set('q', q);
+          params.set('locationQuery', q);
+          params.set('allTimeSearch', 'true');
+        }
+        const branch = String(state.filterBranch || '').trim();
+        if (branch) {
+          params.set('branch', branch);
+        }
+        const startTs = parseDateTimeLocalValue(state.filterStartAt);
+        if (startTs !== null) {
+          params.set('from', new Date(startTs).toISOString());
+        }
+        const endTs = parseDateTimeLocalValue(state.filterEndAt);
+        if (endTs !== null) {
+          params.set('to', new Date(endTs).toISOString());
+        }
         return `/walks/history?${params.toString()}`;
       };
 
@@ -986,6 +1307,133 @@
       }
     }
 
+    async function superadminRequest(url, options = {}) {
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      return data;
+    }
+
+    function renderAdminUsers(rows) {
+      if (!adminList) return;
+      adminList.innerHTML = '';
+      if (!Array.isArray(rows) || rows.length === 0) {
+        adminList.innerHTML = '<p class="empty">No branch admins found.</p>';
+        return;
+      }
+
+      rows.forEach((admin) => {
+        const card = document.createElement('article');
+        card.className = 'admin-item';
+        const activeLabel = admin.isActive ? 'Active' : 'Inactive';
+        const inviteLabel = admin.inviteStatus ? `Invite: ${admin.inviteStatus}` : 'Invite: none';
+        const lastLogin = admin.lastLogin ? new Date(admin.lastLogin).toLocaleString() : 'Never';
+        const safeEmail = String(admin.email || '').replace(/"/g, '&quot;');
+        const safeBranch = String(admin.branch || '').replace(/"/g, '&quot;');
+        const resendInviteId = admin.inviteId || '';
+
+        card.innerHTML = `
+          <div><strong>${admin.name || admin.email}</strong> (${activeLabel})</div>
+          <div class="admin-meta">${admin.email} • Branch: ${admin.branch || 'Unassigned'} • ${inviteLabel} • Last login: ${lastLogin}</div>
+          <div class="admin-actions">
+            <input class="mini-input" data-branch-input="${admin.id}" value="${safeBranch}" placeholder="new branch" />
+            <button class="mini-btn" data-action="reassign" data-id="${admin.id}">Reassign</button>
+            <button class="mini-btn" data-action="reset" data-id="${admin.id}">Send Reset</button>
+            <button class="mini-btn" data-action="resend" data-id="${resendInviteId}" ${resendInviteId ? '' : 'disabled'} data-email="${safeEmail}">Resend Invite</button>
+            ${admin.isActive
+              ? `<button class="mini-btn warn" data-action="deactivate" data-id="${admin.id}">Deactivate</button>`
+              : `<button class="mini-btn" data-action="reactivate" data-id="${admin.id}">Reactivate</button>`}
+          </div>
+        `;
+        adminList.appendChild(card);
+      });
+    }
+
+    async function fetchSuperadminUsers() {
+      if (!isSuperadmin || !superadminPanel) return;
+      try {
+        const data = await superadminRequest('/admin/admin-users');
+        renderAdminUsers(data.admins || []);
+      } catch (error) {
+        setSuperadminStatus(error.message || 'Failed to load admin users.');
+      }
+    }
+
+    async function sendInvite() {
+      const email = String(inviteEmail?.value || '').trim();
+      const branch = String(inviteBranch?.value || '').trim();
+      if (!email || !branch) {
+        setSuperadminStatus('Email and branch are required.');
+        return;
+      }
+      setSuperadminStatus('Sending invite...');
+      try {
+        await superadminRequest('/admin/admin-invites', {
+          method: 'POST',
+          body: JSON.stringify({ email, branch })
+        });
+        setSuperadminStatus('Invite sent.');
+        inviteEmail.value = '';
+        inviteBranch.value = '';
+        fetchSuperadminUsers();
+      } catch (error) {
+        setSuperadminStatus(error.message || 'Failed to send invite.');
+      }
+    }
+
+    async function handleAdminAction(action, id, branchValue) {
+      const actionMap = {
+        deactivate: { url: `/admin/admin-users/${id}/deactivate`, method: 'POST', body: null, message: 'Admin deactivated.' },
+        reactivate: { url: `/admin/admin-users/${id}/reactivate`, method: 'POST', body: null, message: 'Admin reactivated.' },
+        reset: { url: `/admin/admin-users/${id}/reset-password`, method: 'POST', body: null, message: 'Reset link sent.' },
+        resend: { url: `/admin/admin-invites/${id}/resend`, method: 'POST', body: null, message: 'Invite resent.' },
+        reassign: { url: `/admin/admin-users/${id}/reassign-branch`, method: 'POST', body: JSON.stringify({ branch: branchValue }), message: 'Branch reassigned.' }
+      };
+      const cfg = actionMap[action];
+      if (!cfg) return;
+      if (action === 'reassign' && !String(branchValue || '').trim()) {
+        setSuperadminStatus('Enter a branch value before reassign.');
+        return;
+      }
+      setSuperadminStatus('Processing...');
+      try {
+        await superadminRequest(cfg.url, { method: cfg.method, body: cfg.body || undefined });
+        setSuperadminStatus(cfg.message);
+        fetchSuperadminUsers();
+        fetchHistory();
+      } catch (error) {
+        setSuperadminStatus(error.message || 'Action failed.');
+      }
+    }
+
+    function applyFiltersAndFetch(options = {}) {
+      const query = String(searchQuery.value || '').trim();
+      state.filterQuery = query.length >= 2 ? query : '';
+      state.filterBranch = branchFilter.value;
+      state.filterStartAt = startDateTime.value;
+      state.filterEndAt = endDateTime.value;
+
+      if (state.filterStartAt && state.filterEndAt) {
+        const startTs = parseDateTimeLocalValue(state.filterStartAt);
+        const endTs = parseDateTimeLocalValue(state.filterEndAt);
+        if (startTs !== null && endTs !== null && startTs > endTs) {
+          setStatus('Start date/time must be before end date/time.');
+          return;
+        }
+      }
+
+      fetchHistory();
+    }
+
     function attachEvents() {
       document.querySelectorAll('[data-days]').forEach((chip) => {
         chip.addEventListener('click', () => {
@@ -995,27 +1443,12 @@
         });
       });
 
-      applyFilterBtn.addEventListener('click', () => {
-        state.filterBranch = branchFilter.value;
-        state.filterStartAt = startDateTime.value;
-        state.filterEndAt = endDateTime.value;
-
-        if (state.filterStartAt && state.filterEndAt) {
-          const startTs = parseDateTimeLocalValue(state.filterStartAt);
-          const endTs = parseDateTimeLocalValue(state.filterEndAt);
-          if (startTs !== null && endTs !== null && startTs > endTs) {
-            setStatus('Start date/time must be before end date/time.');
-            return;
-          }
-        }
-
-        fetchHistory();
-      });
-
-      allWalksBtn.addEventListener('click', () => {
+      clearFiltersBtn.addEventListener('click', () => {
         state.filterBranch = '';
         state.filterStartAt = '';
         state.filterEndAt = '';
+        state.filterQuery = '';
+        searchQuery.value = '';
         branchFilter.value = '';
         startDateTime.value = '';
         endDateTime.value = '';
@@ -1023,8 +1456,81 @@
         fetchHistory();
       });
 
+      searchQuery.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        applyFiltersAndFetch();
+      });
+
+      searchQuery.addEventListener('input', () => {
+        if (searchDebounceTimer) {
+          window.clearTimeout(searchDebounceTimer);
+        }
+        searchDebounceTimer = window.setTimeout(() => {
+          applyFiltersAndFetch();
+        }, 250);
+      });
+
+      branchFilter.addEventListener('change', () => {
+        applyFiltersAndFetch();
+      });
+
+      startDateTime.addEventListener('change', () => {
+        applyFiltersAndFetch();
+      });
+
+      endDateTime.addEventListener('change', () => {
+        applyFiltersAndFetch();
+      });
+
+      if (settingsLink) {
+        settingsLink.setAttribute(
+          'href',
+          isSuperadmin ? '/admin-settings.html?scope=superadmin' : '/admin-settings.html'
+        );
+      }
+
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', logout);
+      }
+
+      if (isSuperadmin && superadminPanel) {
+        superadminPanel.classList.add('show');
+        sendInviteBtn.addEventListener('click', sendInvite);
+        inviteEmail.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          sendInvite();
+        });
+        inviteBranch.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          sendInvite();
+        });
+
+        adminList.addEventListener('click', (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          const action = target.getAttribute('data-action');
+          const id = target.getAttribute('data-id');
+          if (!action || !id) return;
+          let branchValue = '';
+          if (action === 'reassign') {
+            const input = adminList.querySelector(`input[data-branch-input="${id}"]`);
+            branchValue = input instanceof HTMLInputElement ? input.value : '';
+          }
+          handleAdminAction(action, id, branchValue);
+        });
+      }
+
       document.getElementById('actionSecondary').addEventListener('click', closeDetails);
-      window.addEventListener('beforeunload', clearReplay);
+      window.addEventListener('beforeunload', () => {
+        clearReplay();
+        if (superadminRefreshTimer) {
+          window.clearInterval(superadminRefreshTimer);
+          superadminRefreshTimer = null;
+        }
+      });
     }
 
     function init() {
@@ -1040,6 +1546,10 @@
       }
 
       window.setInterval(fetchHistory, 30000);
+      if (isSuperadmin) {
+        fetchSuperadminUsers();
+        superadminRefreshTimer = window.setInterval(fetchSuperadminUsers, 30000);
+      }
     }
 
     init();

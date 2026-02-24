@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, extractToken } from '../lib/auth';
 import { ensureGuestUser } from '../lib/guestAuth';
-import { prisma } from '../lib/db';
+import { executeRawQuery, prisma } from '../lib/db';
 
 declare global {
     namespace Express {
@@ -11,6 +11,7 @@ declare global {
                 email: string;
                 role: string;
                 branch: string | null;
+                tokenVersion?: number;
             };
         }
     }
@@ -63,11 +64,22 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
             return;
         }
 
+        const tokenVersionRows = await executeRawQuery<Array<{ token_version: number | null }>>(
+            'SELECT COALESCE(token_version, 0) AS token_version FROM users WHERE id = $1::uuid LIMIT 1',
+            [user.id]
+        );
+        const tokenVersion = Number(tokenVersionRows[0]?.token_version ?? 0);
+        if (tokenVersion !== Number(payload.tokenVersion ?? 0)) {
+            res.status(401).json({ error: 'Session expired. Please log in again.' });
+            return;
+        }
+
         req.user = {
             userId: user.id,
             email: user.email,
             role: user.role,
             branch: user.branch,
+            tokenVersion,
         };
         next();
     } catch (error) {

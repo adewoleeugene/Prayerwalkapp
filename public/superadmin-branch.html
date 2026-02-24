@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Details</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root { --bg:#edf1f7; --card:#fff; --border:#d6dfec; --text:#12284a; --muted:#5f7292; --primary:#1f66ff; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:"Avenir Next","Segoe UI",sans-serif;padding:14px}
+    .shell{max-width:1480px;margin:0 auto;display:grid;gap:12px}
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 22px rgba(24,40,72,.06)}
+    .header{padding:14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .title{margin:0;font-size:1.35rem}
+    .muted{margin:6px 0 0;color:var(--muted);font-size:.92rem}
+    .btn{border:none;border-radius:999px;padding:10px 14px;font-weight:700;cursor:pointer;background:#e7edf8;color:var(--text);text-decoration:none;display:inline-block}
+    .stats{padding:12px;display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px}
+    .stat{border:1px solid var(--border);border-radius:12px;background:#f7faff;padding:10px}
+    .stat .k{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+    .stat .v{margin-top:6px;font-size:1.2rem;font-weight:800}
+    .main{padding:12px}
+    #map{width:100%;min-height:70vh;border:1px solid var(--border);border-radius:12px}
+    .status{margin-top:8px;color:var(--muted);font-size:.9rem;min-height:18px}
+    @media (max-width:960px){.stats{grid-template-columns:1fr 1fr} #map{min-height:52vh}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="panel header">
+      <div>
+        <h1 id="branchTitle" class="title">Branch Details</h1>
+        <p id="branchMeta" class="muted"></p>
+      </div>
+      <a class="btn" href="/superadmin.html?v=superadmin-20260224">Back to Dashboard</a>
+    </header>
+
+    <section class="panel stats">
+      <article class="stat"><div class="k">Walks (All-Time)</div><div id="statWalks" class="v">0</div></article>
+      <article class="stat"><div class="k">Active Walks</div><div id="statActive" class="v">0</div></article>
+      <article class="stat"><div class="k">Distance</div><div id="statDistance" class="v">0 km</div></article>
+      <article class="stat"><div class="k">Admins</div><div id="statAdmins" class="v">0</div></article>
+    </section>
+
+    <section class="panel main">
+      <div id="map"></div>
+      <p id="status" class="status"></p>
+    </section>
+  </main>
+
+  <script>
+    const authToken = localStorage.getItem('adminToken') || '';
+    const role = (localStorage.getItem('adminUserRole') || '').toLowerCase();
+    if (!authToken || role !== 'superadmin') window.location.replace('/admin');
+
+    const params = new URLSearchParams(window.location.search);
+    const branchQuery = String(params.get('branch') || '').trim();
+    if (!branchQuery) window.location.replace('/superadmin.html?v=superadmin-20260224');
+
+    const map = L.map('map', { zoomControl: true, maxZoom: 19 }).setView([8.48847, -13.26486], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    const layerGroup = L.layerGroup().addTo(map);
+
+    function setStatus(text){ document.getElementById('status').textContent = text || ''; }
+    function toDistanceLabel(meters){ const v=Number(meters||0); return v>=1000?`${(v/1000).toFixed(2)} km`:`${Math.round(v)} m`; }
+
+    async function api(url){
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${authToken}` } });
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data;
+    }
+
+    async function loadBranch(){
+      setStatus('Loading branch details...');
+      try {
+        const [branchData, walksData, adminData] = await Promise.all([
+          api('/admin/branches'),
+          api(`/walks/history?limit=5000&walkType=all&includeActive=true&allTime=true&branch=${encodeURIComponent(branchQuery)}`),
+          api('/admin/admin-users')
+        ]);
+
+        const branches = Array.isArray(branchData.branches) ? branchData.branches : [];
+        const branch = branches.find((b)=>String(b.slug||'').toLowerCase()===branchQuery.toLowerCase())
+          || branches.find((b)=>String(b.name||'').toLowerCase()===branchQuery.toLowerCase());
+
+        if(!branch){ setStatus('Branch not found.'); return; }
+
+        document.getElementById('branchTitle').textContent = `${branch.name} (${branch.slug})`;
+        document.getElementById('branchMeta').textContent = `Center: ${Number(branch.lat).toFixed(5)}, ${Number(branch.lng).toFixed(5)} • Radius: ${toDistanceLabel(branch.radiusMeters)} • ${branch.isActive ? 'Active' : 'Inactive'}`;
+
+        const walks = Array.isArray(walksData.routes) ? walksData.routes : [];
+        const walkCount = walks.length;
+        const activeCount = walks.filter((w)=>String(w.status||'').toLowerCase()==='active').length;
+        const totalDistance = walks.reduce((sum,w)=>sum+Number(w.distanceMeters||0),0);
+        const admins = Array.isArray(adminData.admins) ? adminData.admins : [];
+        const branchAdmins = admins.filter((a)=>String(a.branch||'').toLowerCase()===String(branch.slug||'').toLowerCase());
+
+        document.getElementById('statWalks').textContent = String(walkCount);
+        document.getElementById('statActive').textContent = String(activeCount);
+        document.getElementById('statDistance').textContent = toDistanceLabel(totalDistance);
+        document.getElementById('statAdmins').textContent = String(branchAdmins.length);
+
+        layerGroup.clearLayers();
+        const bounds = [];
+
+        const center = [Number(branch.lat), Number(branch.lng)];
+        if (Number.isFinite(center[0]) && Number.isFinite(center[1])) {
+          L.marker(center, { title: branch.name }).addTo(layerGroup).bindTooltip(`${branch.name} center`, { direction:'top', offset:[0,-8] });
+          L.circle(center, {
+            radius: Number(branch.radiusMeters || 0),
+            color: '#1f66ff',
+            weight: 2,
+            opacity: 0.45,
+            fillOpacity: 0.05
+          }).addTo(layerGroup);
+          bounds.push(center);
+        }
+
+        walks.forEach((walk)=>{
+          const pts = (walk.points || [])
+            .map((p)=>[Number(p.latitude), Number(p.longitude)])
+            .filter((p)=>Number.isFinite(p[0]) && Number.isFinite(p[1]));
+          if (!pts.length) return;
+          if (pts.length > 1) {
+            L.polyline(pts, { color:'#df3f3f', weight:4, opacity:0.7 }).addTo(layerGroup);
+            const end = pts[pts.length - 1];
+            L.circleMarker(end, { radius:4, color:'#0f4fd8', fillColor:'#0f4fd8', fillOpacity:1, weight:1 })
+              .addTo(layerGroup)
+              .bindTooltip(walk.prayerFocus || walk.branch || 'Prayer walk', { direction:'top' });
+          } else {
+            L.circleMarker(pts[0], { radius:5, color:'#0f4fd8', fillColor:'#0f4fd8', fillOpacity:1, weight:1 })
+              .addTo(layerGroup)
+              .bindTooltip(walk.prayerFocus || walk.branch || 'Prayer walk', { direction:'top' });
+          }
+          pts.forEach((p)=>bounds.push(p));
+        });
+
+        if (bounds.length > 1) map.fitBounds(bounds, { padding:[24,24], maxZoom:14 });
+        else if (bounds.length === 1) map.setView(bounds[0], 13);
+
+        setStatus(`Loaded ${walkCount} walks for ${branch.name}.`);
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || 'Failed to load branch details.');
+      }
+    }
+
+    loadBranch();
+    window.setInterval(loadBranch, 60000);
+  </script>
+</body>
+</html>
