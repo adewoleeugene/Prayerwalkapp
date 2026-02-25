@@ -124,6 +124,31 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 });
 
+// PATCH /admin/me - Update current admin's own profile (name)
+router.patch('/me', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope) return;
+
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+        if (!name) {
+            res.status(400).json({ error: 'name is required' });
+            return;
+        }
+
+        const updated = await prisma.user.update({
+            where: { id: req.user!.userId },
+            data: { name },
+            select: { id: true, name: true, email: true },
+        });
+
+        res.json({ success: true, name: updated.name });
+    } catch (error) {
+        console.error('Admin update profile error:', error);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
 // POST /admin/change-password - Current admin password update
 router.post('/change-password', async (req: Request, res: Response) => {
     try {

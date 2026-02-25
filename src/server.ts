@@ -76,6 +76,12 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'admin-login.html'));
 });
 
+// New React Dashboard (Shadcn)
+app.use('/v2', express.static(path.join(process.cwd(), 'public', 'dashboard')));
+app.get('/v2/*', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard', 'index.html'));
+});
+
 app.get('/superadmin', (req, res) => {
   res.redirect('/admin');
 });

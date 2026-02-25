@@ -312,8 +312,9 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       take: dbTake,
       include: {
         location: {
-          select: { id: true, name: true, prayerText: true, category: true }
+          select: { id: true, name: true, prayerText: true, category: true, points: true }
         },
+        flags: true,
         gpsEvents: {
           orderBy: { timestamp: 'asc' },
           select: { location: true, timestamp: true }
@@ -379,13 +380,22 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
         }
 
         let distanceMeters = 0;
+        const sessionDistTraveled = Number(session.distanceTraveled || 0);
+
         if (points.length >= 2) {
           for (let i = 1; i < points.length; i++) {
             distanceMeters += calculateDistanceMeters(points[i - 1], points[i]);
           }
+          // If calculated distance is weirdly small compared to reported distance, fallback
+          if (distanceMeters < 5 && sessionDistTraveled > 5) {
+            distanceMeters = sessionDistTraveled;
+          }
         } else {
-          distanceMeters = Number(session.distanceTraveled || 0);
+          distanceMeters = sessionDistTraveled;
         }
+
+        // Ensure we never return NaN
+        if (isNaN(distanceMeters)) distanceMeters = sessionDistTraveled || 0;
 
         const startedAtMs = new Date(session.startTime).getTime();
         const endedAtMs = session.endTime ? new Date(session.endTime).getTime() : Date.now();
@@ -439,6 +449,8 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
           prayerSummary,
           prayerJournal,
           prayerFocus,
+          trustScore: session.trustScore,
+          awardedPoints: (session.location as any)?.points || 0,
           points
         };
       })
@@ -522,7 +534,7 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 
       const keys = walk.points.map(toCellKey);
       const avgDensity =
-        keys.reduce((sum, key) => sum + (cellCounts.get(key) || 1), 0) / Math.max(keys.length, 1);
+        keys.reduce((sum: number, key) => sum + (cellCounts.get(key) || 1), 0) / Math.max(keys.length, 1);
       const normalized = Math.min(1, avgDensity / maxCellCount);
       const opacity = 0.25 + normalized * 0.7;
       return { ...walk, opacity: Number(opacity.toFixed(2)) };
