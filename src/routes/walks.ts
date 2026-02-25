@@ -198,7 +198,14 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
     const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 90) : 14;
     const walkType = typeof req.query.walkType === 'string' ? req.query.walkType.trim().toLowerCase() : 'all';
     const includeActive = String(req.query.includeActive || 'true').toLowerCase() !== 'false';
-    const branch = typeof req.query.branch === 'string' && req.query.branch.trim() ? req.query.branch.trim() : null;
+
+    // Branch admins are LOCKED to their assigned branch — they cannot see other branches.
+    // Superadmins may optionally filter by branch via query param.
+    const isBranchAdmin = role === 'admin';
+    const assignedBranch = req.user?.branch?.trim() || null;
+    const branch = isBranchAdmin
+      ? assignedBranch  // force their branch, ignore any ?branch= param
+      : (typeof req.query.branch === 'string' && req.query.branch.trim() ? req.query.branch.trim() : null);
     const branchAliases = new Set<string>();
     if (branch) {
       branchAliases.add(branch);
@@ -284,10 +291,10 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       ),
       ...(branchTerms.length > 0
         ? {
-            OR: branchTerms.map((term) => ({
-              branch: { contains: term, mode: 'insensitive' as const }
-            }))
-          }
+          OR: branchTerms.map((term) => ({
+            branch: { contains: term, mode: 'insensitive' as const }
+          }))
+        }
         : {}),
     };
     const where: any = {
@@ -317,9 +324,9 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
     const userIds = Array.from(new Set(sessions.map((session) => session.userId).filter(Boolean)));
     const users = userIds.length
       ? await prisma.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, name: true, email: true }
-        })
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true }
+      })
       : [];
     const userById = new Map(users.map((user) => [user.id, user] as const));
     const walks = sessions
@@ -332,8 +339,8 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 
         const gpsPoints = cleanRoutePoints(
           session.gpsEvents
-          .map((event) => parseGeoPoint(event.location))
-          .filter((point): point is { latitude: number; longitude: number } => !!point)
+            .map((event) => parseGeoPoint(event.location))
+            .filter((point): point is { latitude: number; longitude: number } => !!point)
         );
 
         const startPoint = parseGeoPoint(session.startLocation);
@@ -398,8 +405,8 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
           startLocationName,
           endLocationName,
           (walkerDisplayName ? `Prayer walk with ${walkerDisplayName}` : null) ||
-            session.branch ||
-            'Open Prayer Walk'
+          session.branch ||
+          'Open Prayer Walk'
         );
         const prayerSummary =
           typeof (session as any).prayerSummary === 'string' && (session as any).prayerSummary.trim()
@@ -457,10 +464,10 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 
     const filteredWalks = shouldApplyRobustSearch
       ? walks.filter((walk) => {
-          if (hasSearch && !matchesWalkSearch(walk, q)) return false;
-          if (hasLocationQuery && !matchesWalkSearch(walk, locationQuery)) return false;
-          return true;
-        })
+        if (hasSearch && !matchesWalkSearch(walk, q)) return false;
+        if (hasLocationQuery && !matchesWalkSearch(walk, locationQuery)) return false;
+        return true;
+      })
       : walks;
     const coordinateSearch =
       parseCoordinateSearchTerm(q) || parseCoordinateSearchTerm(locationQuery);
@@ -470,23 +477,23 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 
     const coordinateFilteredWalks = coordinateSearch
       ? filteredWalks.filter((walk) => {
-          const candidates = [
-            walk.startLocation,
-            walk.endLocation,
-            ...(Array.isArray(walk.points) ? walk.points : [])
-          ].filter((point): point is { latitude: number; longitude: number } => (
-            !!point &&
-            Number.isFinite(Number(point.latitude)) &&
-            Number.isFinite(Number(point.longitude))
-          ));
+        const candidates = [
+          walk.startLocation,
+          walk.endLocation,
+          ...(Array.isArray(walk.points) ? walk.points : [])
+        ].filter((point): point is { latitude: number; longitude: number } => (
+          !!point &&
+          Number.isFinite(Number(point.latitude)) &&
+          Number.isFinite(Number(point.longitude))
+        ));
 
-          return candidates.some((point) => (
-            calculateDistanceMeters(
-              { latitude: Number(point.latitude), longitude: Number(point.longitude) },
-              coordinateSearch
-            ) <= coordinateRadiusMeters
-          ));
-        })
+        return candidates.some((point) => (
+          calculateDistanceMeters(
+            { latitude: Number(point.latitude), longitude: Number(point.longitude) },
+            coordinateSearch
+          ) <= coordinateRadiusMeters
+        ));
+      })
       : filteredWalks;
     const limitedWalks = coordinateFilteredWalks.slice(0, limit);
 

@@ -350,7 +350,7 @@ router.post('/invite/accept', async (req: Request, res: Response) => {
       await executeRawQuery(
         `UPDATE admin_invites
          SET status = 'expired', updated_at = NOW()
-         WHERE id = $1`,
+         WHERE id = $1::uuid`,
         [invite.id]
       );
       res.status(400).json({ error: 'Invite token expired' });
@@ -394,10 +394,10 @@ router.post('/invite/accept', async (req: Request, res: Response) => {
     await executeRawQuery(
       `UPDATE admin_invites
        SET status = 'accepted',
-           accepted_by_user_id = $2,
+           accepted_by_user_id = $2::uuid,
            accepted_at = NOW(),
            updated_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1::uuid`,
       [invite.id, user.id]
     );
 

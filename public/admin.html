@@ -541,13 +541,16 @@
     <section class="panel right">
       <h2>Walk History</h2>
       <div class="history-search-wrap">
-        <input id="searchQuery" class="chip-input history-search" type="search" aria-label="Search walks" placeholder="Search name, location, branch..." />
+        <input id="searchQuery" class="chip-input history-search" type="search" aria-label="Search walks"
+          placeholder="Search name, location, branch..." />
         <span class="history-search-icon" aria-hidden="true">&#128269;</span>
       </div>
-      <div class="history-filter-grid">
+      <div class="history-filter-grid" id="filterGrid">
         <select id="branchFilter" class="chip-select" aria-label="Branch filter">
           <option value="">Any branch</option>
         </select>
+        <span id="branchLabel" class="chip-select"
+          style="display:none;font-weight:700;color:var(--text);cursor:default;"></span>
         <input id="startDateTime" class="chip-input" type="datetime-local" aria-label="Start date and time" />
         <input id="endDateTime" class="chip-input" type="datetime-local" aria-label="End date and time" />
         <button id="clearFiltersBtn" class="chip">Clear</button>
@@ -575,8 +578,10 @@
       <section id="superadminPanel" class="superadmin-panel">
         <h3>Superadmin Branch Admin Control</h3>
         <div class="superadmin-grid">
-          <input id="inviteEmail" class="chip-input" type="email" placeholder="Pastor email" aria-label="Pastor email" />
-          <input id="inviteBranch" class="chip-input" type="text" placeholder="Branch slug or name" aria-label="Branch" />
+          <input id="inviteEmail" class="chip-input" type="email" placeholder="Pastor email"
+            aria-label="Pastor email" />
+          <input id="inviteBranch" class="chip-input" type="text" placeholder="Branch slug or name"
+            aria-label="Branch" />
           <button id="sendInviteBtn" class="chip">Send Invite</button>
         </div>
         <div id="superadminStatus" class="status"></div>
@@ -644,6 +649,34 @@
     const statusText = document.getElementById('statusText');
     const adminRole = (localStorage.getItem('adminUserRole') || '').toLowerCase();
     const isSuperadmin = adminRole === 'superadmin';
+    let adminBranch = (localStorage.getItem('adminUserBranch') || '').trim();
+
+    // For branch admins: always hide the dropdown regardless of cached branch
+    if (!isSuperadmin) {
+      branchFilter.style.display = 'none';
+      document.getElementById('filterGrid').style.gridTemplateColumns = '1fr 1fr auto';
+      const branchLabel = document.getElementById('branchLabel');
+      branchLabel.style.display = '';
+
+      if (adminBranch) {
+        branchLabel.textContent = '📍 ' + adminBranch.charAt(0).toUpperCase() + adminBranch.slice(1);
+      } else {
+        // Branch not cached yet — fetch from API and cache it
+        branchLabel.textContent = '📍 Loading...';
+        fetch('/admin/me', { headers: { Authorization: `Bearer ${authToken}` } })
+          .then((r) => { if (r.status === 401) { handleUnauthorized(); throw new Error('401'); } return r.json(); })
+          .then((data) => {
+            const branch = data?.profile?.branch || '';
+            if (branch) {
+              localStorage.setItem('adminUserBranch', branch);
+              branchLabel.textContent = '📍 ' + branch.charAt(0).toUpperCase() + branch.slice(1);
+            } else {
+              branchLabel.textContent = '📍 My Branch';
+            }
+          })
+          .catch(() => { branchLabel.textContent = '📍 My Branch'; });
+      }
+    }
     const superadminPanel = document.getElementById('superadminPanel');
     const inviteEmail = document.getElementById('inviteEmail');
     const inviteBranch = document.getElementById('inviteBranch');
@@ -662,10 +695,13 @@
       superadminStatus.textContent = text || '';
     }
 
-    function logout() {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUserRole');
+    function handleUnauthorized() {
+      ['adminToken', 'adminUserRole', 'adminUserEmail', 'adminUserBranch'].forEach((k) => localStorage.removeItem(k));
       window.location.replace('/admin-login.html');
+    }
+
+    function logout() {
+      handleUnauthorized();
     }
 
     function toDurationLabel(seconds) {
@@ -718,7 +754,7 @@
               .filter(Boolean);
             if (names.length) return names.join(', ');
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       return 'Unknown participants';
@@ -809,11 +845,12 @@
       return toLatLngPoint(points[points.length - 1] || points[0]);
     }
 
-    function buildRadiusClusters(walks, radiusMeters = 250) {
+    function buildRadiusClusters(walks, radiusMeters = 500) {
       const refs = walks
         .map((walk) => ({ sessionId: walk.sessionId, point: getPinPointForWalk(walk) }))
         .filter((item) => !!item.point);
 
+      // Initial pass: assign each walk to the nearest cluster within radius
       const clusters = [];
       refs.forEach((ref) => {
         let matched = null;
@@ -846,6 +883,38 @@
           longitude: sum.longitude / total
         };
       });
+
+      // Merge pass: keep merging any two clusters whose circles overlap
+      // (centers within 2× radius) until no more merges happen
+      let mergeHappened = true;
+      while (mergeHappened) {
+        mergeHappened = false;
+        for (let i = 0; i < clusters.length; i++) {
+          for (let j = i + 1; j < clusters.length; j++) {
+            const dist = distanceMetersBetweenPoints(clusters[i].center, clusters[j].center);
+            if (dist <= radiusMeters * 2) {
+              // Merge j into i
+              clusters[i].members = clusters[i].members.concat(clusters[j].members);
+              const total = clusters[i].members.length;
+              const sum = clusters[i].members.reduce(
+                (acc, m) => ({
+                  latitude: acc.latitude + m.point.latitude,
+                  longitude: acc.longitude + m.point.longitude
+                }),
+                { latitude: 0, longitude: 0 }
+              );
+              clusters[i].center = {
+                latitude: sum.latitude / total,
+                longitude: sum.longitude / total
+              };
+              clusters.splice(j, 1);
+              mergeHappened = true;
+              break;
+            }
+          }
+          if (mergeHappened) break;
+        }
+      }
 
       return clusters;
     }
@@ -947,7 +1016,7 @@
 
       const bounds = [];
       const walksToRender = state.walks;
-      const radiusMeters = 250;
+      const radiusMeters = 500;
       const radiusClusters = buildRadiusClusters(walksToRender, radiusMeters);
 
       walksToRender.forEach((walk) => {
@@ -1035,7 +1104,10 @@
       });
 
       radiusClusters.forEach((cluster) => {
-        const count = Math.max(1, cluster.members.length);
+        // Count distinct walks (deduplicate by sessionId)
+        const uniqueSessionIds = new Set(cluster.members.map((m) => m.sessionId));
+        const count = uniqueSessionIds.size;
+        if (count < 2) return; // only show badge when 2+ walks in cluster
         const center = cluster.center;
         const badgePoint = pointAtDistance(center, radiusMeters, 45);
         if (!badgePoint) return;
@@ -1273,6 +1345,7 @@
 
       try {
         let res = await fetch(makeUrl(), { headers });
+        if (res.status === 401) { handleUnauthorized(); return; }
         if (!res.ok) throw new Error(`History failed ${res.status}`);
         let payload = await res.json();
         const rows = Array.isArray(payload.routes) ? payload.routes : [];
@@ -1350,8 +1423,8 @@
             <button class="mini-btn" data-action="reset" data-id="${admin.id}">Send Reset</button>
             <button class="mini-btn" data-action="resend" data-id="${resendInviteId}" ${resendInviteId ? '' : 'disabled'} data-email="${safeEmail}">Resend Invite</button>
             ${admin.isActive
-              ? `<button class="mini-btn warn" data-action="deactivate" data-id="${admin.id}">Deactivate</button>`
-              : `<button class="mini-btn" data-action="reactivate" data-id="${admin.id}">Reactivate</button>`}
+            ? `<button class="mini-btn warn" data-action="deactivate" data-id="${admin.id}">Deactivate</button>`
+            : `<button class="mini-btn" data-action="reactivate" data-id="${admin.id}">Reactivate</button>`}
           </div>
         `;
         adminList.appendChild(card);

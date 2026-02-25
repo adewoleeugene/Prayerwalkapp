@@ -1,12 +1,29 @@
-const RESEND_API_URL = 'https://api.resend.com/emails';
+import nodemailer from 'nodemailer';
 
 function escapeHtml(value: string): string {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\"/g, '&quot;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function createTransporter() {
+  const gmailUser = process.env.GMAIL_USER || '';
+  const gmailPass = process.env.GMAIL_APP_PASSWORD || '';
+
+  if (!gmailUser || !gmailPass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: gmailUser,
+      pass: gmailPass,
+    },
+  });
 }
 
 export async function sendEmail(params: {
@@ -14,32 +31,23 @@ export async function sendEmail(params: {
   subject: string;
   html: string;
 }): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY || '';
-  const from = process.env.EMAIL_FROM || 'Prayer Walk <noreply@updates.example.com>';
+  const transporter = createTransporter();
+  const fromAddress = process.env.EMAIL_FROM || `Prayer Walk <${process.env.GMAIL_USER}>`;
 
-  if (!apiKey) {
-    console.warn('RESEND_API_KEY not set. Email delivery skipped.', { to: params.to, subject: params.subject });
+  if (!transporter) {
+    console.warn('GMAIL_USER or GMAIL_APP_PASSWORD not set. Email delivery skipped.', {
+      to: params.to,
+      subject: params.subject,
+    });
     return;
   }
 
-  const res = await fetch(RESEND_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [params.to],
-      subject: params.subject,
-      html: params.html,
-    }),
+  await transporter.sendMail({
+    from: fromAddress,
+    to: params.to,
+    subject: params.subject,
+    html: params.html,
   });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Resend failed (${res.status}): ${body}`);
-  }
 }
 
 export function buildInviteEmailHtml(link: string, branch: string, expiresAtISO: string): string {

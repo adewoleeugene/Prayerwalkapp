@@ -726,6 +726,9 @@ router.get('/admin-users', async (req: Request, res: Response) => {
             return;
         }
 
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+
         const users = await prisma.user.findMany({
             where: { role: 'admin' as any },
             orderBy: [{ branch: 'asc' }, { createdAt: 'desc' }],
@@ -1120,6 +1123,39 @@ router.post('/admin-users/:id/reset-password', async (req: Request, res: Respons
     } catch (error) {
         console.error('Admin reset password error:', error);
         res.status(500).json({ error: 'Failed to send reset password link' });
+    }
+});
+
+// DELETE /admin/admin-users/:id - permanently remove a branch admin
+router.delete('/admin-users/:id', async (req: Request, res: Response) => {
+    try {
+        const scope = getAdminScope(req, res);
+        if (!scope || !requireSuperadmin(scope, res)) {
+            return;
+        }
+
+        const { id } = req.params;
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user || user.role !== 'admin') {
+            res.status(404).json({ error: 'Admin user not found' });
+            return;
+        }
+
+        // Invalidate any active session first
+        await bumpTokenVersion(id);
+
+        await prisma.user.delete({ where: { id } });
+
+        await writeAuditLog({
+            actorUserId: req.user!.userId,
+            action: 'admin_deleted',
+            metadata: { email: user.email, branch: user.branch }
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin delete error:', error);
+        res.status(500).json({ error: 'Failed to delete admin user' });
     }
 });
 
