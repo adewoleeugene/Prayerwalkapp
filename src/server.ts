@@ -210,7 +210,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(Number(PORT), '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
-});
+if (!process.env.VERCEL) {
+  server.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
+  });
+}
+
+export default app;
