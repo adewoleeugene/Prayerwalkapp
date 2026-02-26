@@ -13,7 +13,8 @@
     "db:reset": "tsx scripts/db-reset.ts",
     "db:reset:yes": "tsx scripts/db-reset.ts --yes",
     "prisma:pull": "prisma db pull",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
