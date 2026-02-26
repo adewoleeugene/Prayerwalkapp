@@ -14,7 +14,7 @@ jobs:
     # Run a local PostgreSQL instance for the tests
     services:
       postgres:
-        image: postgres:15
+        image: postgis/postgis:15-3.4
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_password
