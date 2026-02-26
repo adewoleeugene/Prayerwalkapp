@@ -59,7 +59,8 @@ app.get('/', (req, res) => {
       locations: '/locations',
       walks: '/walks',
       users: '/users',
-      documentation: 'See PHASE2_SUMMARY.md'
+      documentation: 'See PHASE2_SUMMARY.md',
+      deployment_at: '2026-02-26T18:31:00Z'
     }
   });
 });
@@ -68,7 +69,7 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log(`[DIAG] ${new Date().toISOString()} - ${req.method} ${req.url} (Path: ${req.path})`);
   next();
 });
 
