@@ -3,6 +3,7 @@ import { prisma } from '../lib/db';
 import { executeRawQuery, createPoint, isWithinRange, parsePoint, calculateDistance } from '../lib/db';
 import { checkAndAwardBadges } from '../lib/badges';
 import { authenticate } from '../middleware/authMiddleware';
+import { validateGPSUpdate } from '../lib/gps';
 
 const router = Router();
 
@@ -633,6 +634,36 @@ router.post('/start', authenticate, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Start walk error:', error);
     res.status(500).json({ error: 'Failed to start walk' });
+  }
+});
+
+// POST /walks/track (replaces WebSocket for serverless)
+router.post('/track', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { sessionId, latitude, longitude, speed, accuracy, isMock } = req.body;
+    const userId = req.user!.userId;
+
+    if (!sessionId || latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ error: 'Missing required tracking data' });
+    }
+
+    try {
+      await validateGPSUpdate(sessionId, userId, {
+        latitude,
+        longitude,
+        speed,
+        accuracy,
+        isMock
+      });
+      res.json({ success: true, status: 'validated' });
+    } catch (err) {
+      console.error("Failed to validate GPS for session", sessionId, err);
+      // Still return 200 so the app doesn't crash on failed validation logs
+      res.json({ success: false, error: 'Validation failed' });
+    }
+  } catch (error) {
+    console.error('Track error:', error);
+    res.status(500).json({ error: 'Failed to record tracking point' });
   }
 });
 

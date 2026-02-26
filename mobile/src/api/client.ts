@@ -137,6 +137,8 @@ export const api = {
                 includeActive: options?.includeActive ?? true,
             }
         }),
+        track: (sessionId: string, latitude: number, longitude: number, speed?: number, accuracy?: number, isMock?: boolean) =>
+            client.post('/walks/track', { sessionId, latitude, longitude, speed, accuracy, isMock }),
         arrive: (sessionId: string, locationId: string, latitude: number, longitude: number) =>
             client.post('/walks/arrive', { sessionId, locationId, latitude, longitude }),
         complete: (

@@ -97,7 +97,6 @@ export default function WalkScreen({ route }: { route: any }) {
 
     useEffect(() => {
         startTracking();
-        connectWebSocket();
 
         return () => {
             if (ws.current) ws.current.close();
@@ -133,13 +132,6 @@ export default function WalkScreen({ route }: { route: any }) {
         currentLocationRef.current = currentLocation;
     }, [currentLocation]);
 
-    const connectWebSocket = () => {
-        const wsUrl = getWebSocketUrl(token, fingerprint);
-        ws.current = new WebSocket(wsUrl);
-        ws.current.onopen = () => console.log('Secure Tunnel Established');
-        ws.current.onerror = (e) => console.log('WS Error', e);
-    };
-
     const startTracking = async () => {
         const sub = await Location.watchPositionAsync(
             {
@@ -167,18 +159,18 @@ export default function WalkScreen({ route }: { route: any }) {
             return [...prev, nextPoint];
         });
 
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({
-                type: 'LOCATION_UPDATE',
-                payload: {
-                    sessionId: sessionIdRef.current,
-                    latitude,
-                    longitude,
-                    speed,
-                    accuracy,
-                    isMock: mockAdvertised || false
-                }
-            }));
+        // Use REST endpoint for serverless tracking instead of websocket
+        try {
+            api.walks.track(
+                sessionIdRef.current,
+                latitude,
+                longitude,
+                speed,
+                accuracy,
+                mockAdvertised || false
+            ).catch((e: any) => console.log('Location update error:', e));
+        } catch (e: any) {
+            console.error('Track call error:', e);
         }
 
         try {
