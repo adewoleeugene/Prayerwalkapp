@@ -157,9 +157,11 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    console.log(`[AUTH] Login attempt for: ${normalizedEmail}`);
 
     // Compatibility shortcut: allow admin@admin.com/admin to enter superadmin.
     if (normalizedEmail === 'admin@admin.com' && password === 'admin') {
+      console.log('[AUTH] Shortcut match triggered for admin@admin.com');
       const superadminUser = await prisma.user.findFirst({
         where: { role: 'superadmin', isActive: true },
         orderBy: { createdAt: 'asc' },
