@@ -13,24 +13,40 @@ import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 const mapContainerStyle = { height: '100%', width: '100%' };
 
+function toLatLng(point: any): { lat: number; lng: number } | null {
+    if (!point) return null;
+    const lat = Number(point.latitude ?? point.lat);
+    const lng = Number(point.longitude ?? point.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+}
+
+function hasMovement(points: Array<{ lat: number; lng: number }>): boolean {
+    if (points.length < 2) return false;
+    const first = points[0];
+    const last = points[points.length - 1];
+    return first.lat !== last.lat || first.lng !== last.lng;
+}
+
 function getWalkTrackPoints(walk: any): Array<{ lat: number; lng: number }> {
     const rawPoints = Array.isArray(walk?.points) ? walk.points : [];
     const parsedPoints = rawPoints
-        .filter((p: any) => Number.isFinite(p?.latitude) && Number.isFinite(p?.longitude))
-        .map((p: any) => ({ lat: Number(p.latitude), lng: Number(p.longitude) }));
+        .map((p: any) => toLatLng(p))
+        .filter((p: { lat: number; lng: number } | null): p is { lat: number; lng: number } => !!p);
+    const startPt = toLatLng(walk?.startLocation);
+    const endPt = toLatLng(walk?.endLocation);
+
+    const fallbackPts =
+        startPt && endPt && hasMovement([startPt, endPt])
+            ? [startPt, endPt]
+            : [];
+    const candidatePts = parsedPoints.length >= 2 ? parsedPoints : fallbackPts;
 
     // For low-quality routes (fallback/synthesized), still show a simple path when movement exists.
     if (walk?.routeQuality === 'low') {
-        if (parsedPoints.length >= 2) {
-            const start = parsedPoints[0];
-            const end = parsedPoints[parsedPoints.length - 1];
-            if (start.lat !== end.lat || start.lng !== end.lng) {
-                return parsedPoints;
-            }
-        }
-        return [];
+        return hasMovement(candidatePts) ? candidatePts : [];
     }
-    return parsedPoints;
+    return candidatePts;
 }
 
 function getWalkIdentity(walk: any): string {
@@ -55,6 +71,9 @@ function getWalkIdentity(walk: any): string {
 
 // ─── Walk Detail Expansion ────────────────────────────────────────────────────
 function WalkDetail({ w }: { w: any }) {
+    const startPt = toLatLng(w.startLocation);
+    const endPt = toLatLng(w.endLocation);
+
     return (
         <div className="mt-4 pt-4 border-t border-primary/10 animate-in slide-in-from-top-2 duration-300 space-y-5">
             <div className="grid grid-cols-2 gap-3">
@@ -111,22 +130,22 @@ function WalkDetail({ w }: { w: any }) {
                     </span>
                 </div>
                 <div className="flex justify-between"><span>Geometry</span><span className="text-foreground capitalize">{w.geometryType || 'Path'}</span></div>
-                {w.startLocation?.latitude != null && (
+                {startPt && (
                     <div className="flex justify-between items-start gap-2">
                         <span className="shrink-0">Start</span>
                         <span className="text-foreground font-mono text-[10px] text-right break-all">
-                            {Number(w.startLocation.latitude).toFixed(6)}, {Number(w.startLocation.longitude).toFixed(6)}
+                            {startPt.lat.toFixed(6)}, {startPt.lng.toFixed(6)}
                         </span>
                     </div>
                 )}
-                {w.endLocation?.latitude != null && (
-                    w.endLocation.latitude !== w.startLocation?.latitude ||
-                    w.endLocation.longitude !== w.startLocation?.longitude
+                {endPt && (
+                    endPt.lat !== startPt?.lat ||
+                    endPt.lng !== startPt?.lng
                 ) && (
                         <div className="flex justify-between items-start gap-2">
                             <span className="shrink-0">End</span>
                             <span className="text-foreground font-mono text-[10px] text-right break-all">
-                                {Number(w.endLocation.latitude).toFixed(6)}, {Number(w.endLocation.longitude).toFixed(6)}
+                                {endPt.lat.toFixed(6)}, {endPt.lng.toFixed(6)}
                             </span>
                         </div>
                     )}
@@ -162,6 +181,7 @@ export default function DashboardPage() {
     const [walksLoading, setWalksLoading] = useState(false);
     const [walksStats, setWalksStats] = useState({ count: 0, distance: 0, duration: 0 });
     const [selectedWalk, setSelectedWalk] = useState<any>(null);
+    const [selectedWalkKey, setSelectedWalkKey] = useState<string | null>(null);
     const [walkSearch, setWalkSearch] = useState('');
     const [days, setDays] = useState(30);
 
@@ -202,11 +222,9 @@ export default function DashboardPage() {
                 walkMapRef.current.fitBounds(bounds);
                 return;
             }
-            if (selectedWalk.startLocation?.latitude != null && selectedWalk.startLocation?.longitude != null) {
-                walkMapRef.current.panTo({
-                    lat: Number(selectedWalk.startLocation.latitude),
-                    lng: Number(selectedWalk.startLocation.longitude),
-                });
+            const selectedStartPt = toLatLng(selectedWalk.startLocation);
+            if (selectedStartPt) {
+                walkMapRef.current.panTo(selectedStartPt);
                 walkMapRef.current.setZoom(15);
                 return;
             }
@@ -231,15 +249,20 @@ export default function DashboardPage() {
         setView('walks');
         setWalks([]);
         setSelectedWalk(null);
+        setSelectedWalkKey(null);
         setWalkSearch('');
         setWalksLoading(true);
         try {
             const rows: any[] = await loadWalksForBranch(branch, days);
-            setWalks(rows);
+            const keyedRows = rows.map((row, idx) => ({
+                ...row,
+                __walkKey: `${row.sessionId || row.id || 'walk'}:${idx}`,
+            }));
+            setWalks(keyedRows);
             setWalksStats({
-                count: rows.length,
-                distance: rows.reduce((s, r) => s + Number(r.distanceMeters || 0), 0) / 1000,
-                duration: Math.round(rows.reduce((s, r) => s + Number(r.durationSeconds || 0), 0) / 60),
+                count: keyedRows.length,
+                distance: keyedRows.reduce((s, r) => s + Number(r.distanceMeters || 0), 0) / 1000,
+                duration: Math.round(keyedRows.reduce((s, r) => s + Number(r.durationSeconds || 0), 0) / 60),
             });
         } catch (e) {
             console.error('Failed to load walks', e);
@@ -253,6 +276,7 @@ export default function DashboardPage() {
         setSelectedBranch(null);
         setWalks([]);
         setSelectedWalk(null);
+        setSelectedWalkKey(null);
     };
 
     const filteredBranches = branches.filter(b =>
@@ -544,19 +568,15 @@ export default function DashboardPage() {
 
                         {filteredWalks.map(w => {
                             const pts = getWalkTrackPoints(w);
-                            const walkIdentity = getWalkIdentity(w);
-                            const isActive = !!selectedWalk && getWalkIdentity(selectedWalk) === walkIdentity;
+                            const walkIdentity = w.__walkKey || getWalkIdentity(w);
+                            const isActive = selectedWalkKey === walkIdentity;
 
                             const startPt = pts.length > 0
                                 ? pts[0]
-                                : (w.startLocation?.latitude != null && w.startLocation?.longitude != null
-                                    ? { lat: Number(w.startLocation.latitude), lng: Number(w.startLocation.longitude) }
-                                    : null);
+                                : toLatLng(w.startLocation);
                             const endPt = pts.length > 1
                                 ? pts[pts.length - 1]
-                                : (w.endLocation?.latitude != null && w.endLocation?.longitude != null
-                                    ? { lat: Number(w.endLocation.latitude), lng: Number(w.endLocation.longitude) }
-                                    : null);
+                                : toLatLng(w.endLocation);
 
                             if (!startPt && pts.length < 1) return null;
 
@@ -570,7 +590,7 @@ export default function DashboardPage() {
                                                 strokeWeight: isActive ? 6 : 2,
                                                 strokeOpacity: isActive ? 1 : 0.55,
                                             }}
-                                            onClick={() => setSelectedWalk(w)}
+                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
                                         />
                                     )}
                                     {startPt && (
@@ -578,7 +598,7 @@ export default function DashboardPage() {
                                             position={startPt}
                                             icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
                                             label={{ text: 'S', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => setSelectedWalk(w)}
+                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
                                         />
                                     )}
                                     {endPt && (endPt.lat !== startPt?.lat || endPt.lng !== startPt?.lng) && (
@@ -586,7 +606,7 @@ export default function DashboardPage() {
                                             position={endPt}
                                             icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/red-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png' }}
                                             label={{ text: 'E', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => setSelectedWalk(w)}
+                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
                                         />
                                     )}
                                 </React.Fragment>
@@ -679,8 +699,8 @@ export default function DashboardPage() {
                         </div>
                     ) : (
                         filteredWalks.map(w => {
-                            const walkIdentity = getWalkIdentity(w);
-                            const isSelected = !!selectedWalk && getWalkIdentity(selectedWalk) === walkIdentity;
+                            const walkIdentity = w.__walkKey || getWalkIdentity(w);
+                            const isSelected = selectedWalkKey === walkIdentity;
                             return (
                                 <div
                                     key={walkIdentity}
@@ -690,7 +710,7 @@ export default function DashboardPage() {
                                             ? "bg-primary/[0.08] border-l-primary shadow-[inset_0_0_0_1px_rgba(37,99,235,0.18)]"
                                             : "border-l-transparent hover:bg-muted/30"
                                     )}
-                                    onClick={() => setSelectedWalk(w)}
+                                    onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
                                 >
                                     <div className="flex items-start justify-between gap-2 mb-1.5">
                                         <div className="flex-1 min-w-0">
