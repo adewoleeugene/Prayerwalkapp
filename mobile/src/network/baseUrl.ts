@@ -11,21 +11,19 @@ function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, '');
 }
 
-function isLocalOrPrivateHost(hostname: string): boolean {
-  if (!hostname) return false;
-  const lower = hostname.toLowerCase();
-  if (lower === 'localhost' || lower === '127.0.0.1') return true;
-  if (/^10\.\d+\.\d+\.\d+$/.test(lower)) return true;
-  if (/^192\.168\.\d+\.\d+$/.test(lower)) return true;
-  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(lower)) return true;
-  return false;
-}
-
 function shouldUseEnvUrlInRelease(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (isLocalOrPrivateHost(parsed.hostname)) return false;
-    return parsed.protocol === 'https:';
+    const protocolOk = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    if (!protocolOk) return false;
+
+    // Physical devices cannot reach localhost/127 loopback of the build host.
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      return false;
+    }
+
+    // Allow private/LAN hosts in release when explicitly configured.
+    return true;
   } catch {
     return false;
   }
