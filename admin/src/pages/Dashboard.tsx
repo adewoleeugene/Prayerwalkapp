@@ -33,20 +33,8 @@ function getWalkTrackPoints(walk: any): Array<{ lat: number; lng: number }> {
     const parsedPoints = rawPoints
         .map((p: any) => toLatLng(p))
         .filter((p: { lat: number; lng: number } | null): p is { lat: number; lng: number } => !!p);
-    const startPt = toLatLng(walk?.startLocation);
-    const endPt = toLatLng(walk?.endLocation);
-
-    const fallbackPts =
-        startPt && endPt && hasMovement([startPt, endPt])
-            ? [startPt, endPt]
-            : [];
-    const candidatePts = parsedPoints.length >= 2 ? parsedPoints : fallbackPts;
-
-    // For low-quality routes (fallback/synthesized), still show a simple path when movement exists.
-    if (walk?.routeQuality === 'low') {
-        return hasMovement(candidatePts) ? candidatePts : [];
-    }
-    return candidatePts;
+    if (walk?.routeQuality !== 'high') return [];
+    return parsedPoints.length >= 2 && hasMovement(parsedPoints) ? parsedPoints : [];
 }
 
 function getWalkIdentity(walk: any): string {
@@ -223,6 +211,14 @@ export default function DashboardPage() {
                 return;
             }
             const selectedStartPt = toLatLng(selectedWalk.startLocation);
+            const selectedEndPt = toLatLng(selectedWalk.endLocation);
+            if (selectedStartPt && selectedEndPt && (selectedStartPt.lat !== selectedEndPt.lat || selectedStartPt.lng !== selectedEndPt.lng)) {
+                const bounds = new gm.LatLngBounds();
+                bounds.extend(selectedStartPt);
+                bounds.extend(selectedEndPt);
+                walkMapRef.current.fitBounds(bounds);
+                return;
+            }
             if (selectedStartPt) {
                 walkMapRef.current.panTo(selectedStartPt);
                 walkMapRef.current.setZoom(15);
