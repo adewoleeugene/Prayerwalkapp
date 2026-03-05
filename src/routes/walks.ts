@@ -185,11 +185,10 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
           return null;
         }
 
-        const gpsPoints = cleanRoutePoints(
-          session.gpsEvents
-            .map((event) => parseGeoPoint(event.location))
-            .filter((point): point is { latitude: number; longitude: number } => !!point)
-        );
+        const rawGpsPoints = session.gpsEvents
+          .map((event) => parseGeoPoint(event.location))
+          .filter((point): point is { latitude: number; longitude: number } => !!point);
+        const gpsPoints = cleanRoutePoints(rawGpsPoints);
 
         const startPoint = parseGeoPoint(session.startLocation);
         const currentPoint = parseGeoPoint(session.currentLocation);
@@ -198,6 +197,15 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
         let geometryType: 'path' | 'spot' = 'path';
         let routeQuality: 'high' | 'medium' | 'low' = 'high';
 
+        if (points.length < 2 && rawGpsPoints.length >= 2) {
+          const first = rawGpsPoints[0];
+          const last = rawGpsPoints[rawGpsPoints.length - 1];
+          if (first && last && (first.latitude !== last.latitude || first.longitude !== last.longitude)) {
+            points = [first, last];
+            routeQuality = 'medium';
+          }
+        }
+
         if (points.length < 2) {
           const fallback = [startPoint, currentPoint].filter(
             (point): point is { latitude: number; longitude: number } => !!point
@@ -205,8 +213,15 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 
           if (fallback.length >= 2) {
             const uniqueFallback = cleanRoutePoints(fallback);
+            const firstFallback = fallback[0];
+            const lastFallback = fallback[fallback.length - 1];
+            const fallbackMoved = !!firstFallback && !!lastFallback &&
+              (firstFallback.latitude !== lastFallback.latitude || firstFallback.longitude !== lastFallback.longitude);
             if (uniqueFallback.length >= 2) {
               points = uniqueFallback;
+              routeQuality = 'low';
+            } else if (fallbackMoved) {
+              points = [firstFallback, lastFallback];
               routeQuality = 'low';
             } else {
               points = [uniqueFallback[0]];
