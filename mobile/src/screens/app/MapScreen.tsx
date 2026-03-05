@@ -535,6 +535,9 @@ export default function MapScreen() {
             const lng = location?.coords.longitude;
             fetchBranches(lat, lng);
         }
+        if (!startBranch && sortedBranches.length > 0) {
+            setStartBranch(sortedBranches[0]);
+        }
         setTargetLocation(loc || null);
         setDrawerVisible(true);
     };
@@ -553,26 +556,24 @@ export default function MapScreen() {
     };
 
     const confirmStartWalk = async () => {
-        if (!location) return;
+        if (!location) {
+            Alert.alert('Location Pending', 'Please wait for GPS location, then try again.');
+            return;
+        }
         if (activeWalk) {
             Alert.alert('Walk Active', 'Please end the current walk before starting another.');
             return;
         }
 
         // Validation
-        if (!startBranch) {
-            Alert.alert('Required', 'Please select a branch.');
-            return;
-        }
+        const branchForStart = startBranch || sortedBranches[0] || 'International';
         const pendingParticipant = participantInput.trim();
         const participantsForStart = pendingParticipant
             ? [...participants, pendingParticipant]
             : participants;
-
-        if (participantsForStart.length === 0) {
-            Alert.alert('Required', 'Please add at least one name in Team before starting.');
-            return;
-        }
+        const normalizedParticipants = participantsForStart.length > 0
+            ? participantsForStart
+            : ['Prayer Team'];
         try {
             let startLatitude = location.coords.latitude;
             let startLongitude = location.coords.longitude;
@@ -610,8 +611,8 @@ export default function MapScreen() {
                 startLatitude,
                 startLongitude,
                 fingerprint,
-                startBranch,
-                participantsForStart,
+                branchForStart,
+                normalizedParticipants,
                 startAddressLabel
             );
 
@@ -625,7 +626,7 @@ export default function MapScreen() {
                 const nextActiveWalk = {
                     sessionId: String(session?.id),
                     targetLocation: targetLocation || null,
-                    branch: String(session?.branch || startBranch || 'International'),
+                    branch: String(session?.branch || branchForStart || 'International'),
                     participants: parsedParticipants,
                     startedAt: String(session?.startTime || new Date().toISOString()),
                 };
