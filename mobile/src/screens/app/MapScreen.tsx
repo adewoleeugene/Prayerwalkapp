@@ -1158,9 +1158,11 @@ const styles = StyleSheet.create({
     },
     filtersWrap: {
         position: 'absolute',
-        top: 108,
+        top: Platform.OS === 'ios' ? 82 : 48,
         left: 14,
         right: 14,
+        zIndex: 15,
+        elevation: 15,
     },
     bottomSyncBannerWrap: {
         alignSelf: 'center',
