@@ -13,6 +13,46 @@ import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 const mapContainerStyle = { height: '100%', width: '100%' };
 
+function getWalkTrackPoints(walk: any): Array<{ lat: number; lng: number }> {
+    const rawPoints = Array.isArray(walk?.points) ? walk.points : [];
+    const parsedPoints = rawPoints
+        .filter((p: any) => Number.isFinite(p?.latitude) && Number.isFinite(p?.longitude))
+        .map((p: any) => ({ lat: Number(p.latitude), lng: Number(p.longitude) }));
+
+    // For low-quality routes (fallback/synthesized), still show a simple path when movement exists.
+    if (walk?.routeQuality === 'low') {
+        if (parsedPoints.length >= 2) {
+            const start = parsedPoints[0];
+            const end = parsedPoints[parsedPoints.length - 1];
+            if (start.lat !== end.lat || start.lng !== end.lng) {
+                return parsedPoints;
+            }
+        }
+        return [];
+    }
+    return parsedPoints;
+}
+
+function getWalkIdentity(walk: any): string {
+    if (!walk) return '';
+    if (typeof walk.sessionId === 'string' && walk.sessionId.trim()) return `session:${walk.sessionId}`;
+    if (typeof walk.id === 'string' && walk.id.trim()) return `id:${walk.id}`;
+
+    const startedAtMs = walk.startedAt ? Date.parse(String(walk.startedAt)) : NaN;
+    const endedAtMs = walk.endedAt ? Date.parse(String(walk.endedAt)) : NaN;
+    const startedAt = Number.isFinite(startedAtMs) ? String(startedAtMs) : '';
+    const endedAt = Number.isFinite(endedAtMs) ? String(endedAtMs) : '';
+    const walker = Array.isArray(walk.participantNames) && walk.participantNames.length > 0
+        ? walk.participantNames.join('|')
+        : (walk.participants || walk.walkerDisplayName || walk.userId || '');
+    const startName = walk.startLocationName || '';
+    const endName = walk.endLocationName || '';
+    const startLat = walk.startLocation?.latitude != null ? String(walk.startLocation.latitude) : '';
+    const startLng = walk.startLocation?.longitude != null ? String(walk.startLocation.longitude) : '';
+
+    return `fallback:${startedAt}:${endedAt}:${walker}:${startName}:${endName}:${startLat}:${startLng}`;
+}
+
 // ─── Walk Detail Expansion ────────────────────────────────────────────────────
 function WalkDetail({ w }: { w: any }) {
     return (
@@ -154,9 +194,7 @@ export default function DashboardPage() {
         if (!gm) return;
 
         if (selectedWalk) {
-            const pts = (selectedWalk.points || [])
-                .filter((p: any) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
-                .map((p: any) => ({ lat: Number(p.latitude), lng: Number(p.longitude) }));
+            const pts = getWalkTrackPoints(selectedWalk);
 
             if (pts.length > 1) {
                 const bounds = new gm.LatLngBounds();
@@ -175,9 +213,7 @@ export default function DashboardPage() {
         }
 
         const allPts = walks
-            .flatMap((w) => w.points || [])
-            .filter((p: any) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
-            .map((p: any) => ({ lat: Number(p.latitude), lng: Number(p.longitude) }));
+            .flatMap((w) => getWalkTrackPoints(w));
 
         if (allPts.length > 1) {
             const bounds = new gm.LatLngBounds();
@@ -507,10 +543,9 @@ export default function DashboardPage() {
                         )}
 
                         {filteredWalks.map(w => {
-                            const pts = (w.points || [])
-                                .filter((p: any) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
-                                .map((p: any) => ({ lat: Number(p.latitude), lng: Number(p.longitude) }));
-                            const isActive = selectedWalk?.sessionId === w.sessionId;
+                            const pts = getWalkTrackPoints(w);
+                            const walkIdentity = getWalkIdentity(w);
+                            const isActive = !!selectedWalk && getWalkIdentity(selectedWalk) === walkIdentity;
 
                             const startPt = pts.length > 0
                                 ? pts[0]
@@ -526,7 +561,7 @@ export default function DashboardPage() {
                             if (!startPt && pts.length < 1) return null;
 
                             return (
-                                <React.Fragment key={w.sessionId}>
+                                <React.Fragment key={walkIdentity}>
                                     {pts.length > 1 && (
                                         <PolylineF
                                             path={pts}
@@ -535,7 +570,7 @@ export default function DashboardPage() {
                                                 strokeWeight: isActive ? 6 : 2,
                                                 strokeOpacity: isActive ? 1 : 0.55,
                                             }}
-                                            onClick={() => setSelectedWalk(isActive ? null : w)}
+                                            onClick={() => setSelectedWalk(w)}
                                         />
                                     )}
                                     {startPt && (
@@ -543,7 +578,7 @@ export default function DashboardPage() {
                                             position={startPt}
                                             icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
                                             label={{ text: 'S', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => setSelectedWalk(isActive ? null : w)}
+                                            onClick={() => setSelectedWalk(w)}
                                         />
                                     )}
                                     {endPt && (endPt.lat !== startPt?.lat || endPt.lng !== startPt?.lng) && (
@@ -551,7 +586,7 @@ export default function DashboardPage() {
                                             position={endPt}
                                             icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/red-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png' }}
                                             label={{ text: 'E', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => setSelectedWalk(isActive ? null : w)}
+                                            onClick={() => setSelectedWalk(w)}
                                         />
                                     )}
                                 </React.Fragment>
@@ -644,21 +679,25 @@ export default function DashboardPage() {
                         </div>
                     ) : (
                         filteredWalks.map(w => {
-                            const isSelected = selectedWalk?.sessionId === w.sessionId;
+                            const walkIdentity = getWalkIdentity(w);
+                            const isSelected = !!selectedWalk && getWalkIdentity(selectedWalk) === walkIdentity;
                             return (
                                 <div
-                                    key={w.sessionId}
+                                    key={walkIdentity}
                                     className={cn(
                                         "px-5 py-4 border-b cursor-pointer transition-all border-l-4 group",
                                         isSelected
-                                            ? "bg-primary/[0.05] border-l-primary"
+                                            ? "bg-primary/[0.08] border-l-primary shadow-[inset_0_0_0_1px_rgba(37,99,235,0.18)]"
                                             : "border-l-transparent hover:bg-muted/30"
                                     )}
-                                    onClick={() => setSelectedWalk(isSelected ? null : w)}
+                                    onClick={() => setSelectedWalk(w)}
                                 >
                                     <div className="flex items-start justify-between gap-2 mb-1.5">
                                         <div className="flex-1 min-w-0">
-                                            <h4 className="font-black text-sm text-foreground leading-tight group-hover:text-primary transition-colors truncate">
+                                            <h4 className={cn(
+                                                "font-black text-sm leading-tight transition-colors truncate",
+                                                isSelected ? "text-primary" : "text-foreground group-hover:text-primary"
+                                            )}>
                                                 {w.startLocationName || w.endLocationName || 'Prayer Walk'}
                                             </h4>
                                             {(() => {
