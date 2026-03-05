@@ -50,8 +50,21 @@ export const api = {
             }),
     },
     walks: {
-        start: (locationId: string, latitude: number, longitude: number, deviceFingerprint?: string, branch?: string, participants?: string[], startAddress?: string) =>
-            client.post('/walks/start', { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress }),
+        start: (
+            locationId: string | undefined,
+            latitude: number,
+            longitude: number,
+            deviceFingerprint?: string,
+            branch?: string,
+            participants?: string[],
+            startAddress?: string,
+            meta?: {
+                clientRequestId?: string;
+                clientEventAt?: string;
+                localSessionId?: string;
+            }
+        ) =>
+            client.post('/walks/start', { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress, ...meta }),
         history: (
             limit = 80,
             options?: {
@@ -69,19 +82,44 @@ export const api = {
                 includeActive: options?.includeActive ?? true,
             }
         }),
-        track: (sessionId: string, latitude: number, longitude: number, speed?: number, accuracy?: number, isMock?: boolean) =>
-            client.post('/walks/track', { sessionId, latitude, longitude, speed, accuracy, isMock }),
-        arrive: (sessionId: string, locationId: string, latitude: number, longitude: number) =>
-            client.post('/walks/arrive', { sessionId, locationId, latitude, longitude }),
-        complete: (
+        track: (
+            sessionId: string,
+            latitude: number,
+            longitude: number,
+            speed?: number,
+            accuracy?: number,
+            isMock?: boolean,
+            meta?: {
+                clientRequestId?: string;
+                clientEventAt?: string;
+            }
+        ) =>
+            client.post('/walks/track', { sessionId, latitude, longitude, speed, accuracy, isMock, ...meta }),
+        arrive: (
             sessionId: string,
             locationId: string,
             latitude: number,
             longitude: number,
-            prayerSummary?: string,
-            prayerJournal?: string
+            meta?: {
+                clientRequestId?: string;
+                clientEventAt?: string;
+            }
         ) =>
-            client.post('/walks/complete', { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal }),
+            client.post('/walks/arrive', { sessionId, locationId, latitude, longitude, ...meta }),
+        complete: (
+            sessionId: string,
+            locationId: string | undefined,
+            latitude: number,
+            longitude: number,
+            prayerSummary?: string,
+            prayerJournal?: string,
+            meta?: {
+                clientRequestId?: string;
+                clientEventAt?: string;
+                localSessionId?: string;
+            }
+        ) =>
+            client.post('/walks/complete', { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal, ...meta }),
     },
 };
 

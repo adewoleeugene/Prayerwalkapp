@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authMiddleware';
 import { validateGPSUpdate } from '../lib/gps';
 import { logger } from '../lib/logger';
 import { DomainError } from '../errors/domainError';
+import { executeIdempotentRequest } from '../lib/idempotency';
 import {
   calculateDistanceMeters,
   cleanRoutePoints,
@@ -400,33 +401,62 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 // POST /walks/start
 router.post('/start', authenticate, async (req: Request, res: Response) => {
   try {
-    const { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress } = req.body;
-    const result = await startWalk({
+    const { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress, clientRequestId, clientEventAt, localSessionId } = req.body;
+    const result = await executeIdempotentRequest({
+      idempotencyKey: typeof clientRequestId === 'string' ? clientRequestId : undefined,
+      endpoint: 'walks/start',
       userId: req.user!.userId,
-      locationId,
-      latitude,
-      longitude,
-      deviceFingerprint,
-      branch,
-      participants,
-      startAddress,
+      payload: {
+        locationId,
+        latitude,
+        longitude,
+        deviceFingerprint,
+        branch,
+        participants,
+        startAddress,
+        clientEventAt,
+        localSessionId,
+      },
+      execute: async () => {
+        const started = await startWalk({
+          userId: req.user!.userId,
+          locationId,
+          latitude,
+          longitude,
+          deviceFingerprint,
+          branch,
+          participants,
+          startAddress,
+        });
+
+        if (started.resumed) {
+          return {
+            statusCode: 200,
+            body: {
+              success: true,
+              message: 'Resuming existing active session',
+              session: started.session,
+              location: null,
+            },
+          };
+        }
+
+        return {
+          statusCode: 201,
+          body: {
+            success: true,
+            message: 'Walk started with Route Integrity enabled',
+            session: started.session,
+            location: started.location,
+          },
+        };
+      },
     });
 
-    if (result.resumed) {
-      res.status(200).json({
-        success: true,
-        message: 'Resuming existing active session',
-        session: result.session,
-        location: null,
-      });
-      return;
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Walk started with Route Integrity enabled',
-      session: result.session,
-      location: result.location,
+    res.status(result.statusCode).json({
+      ...result.body,
+      acceptedAt: result.acceptedAt,
+      idempotentReplay: result.idempotentReplay,
     });
   } catch (error) {
     if (error instanceof DomainError) {
@@ -441,7 +471,7 @@ router.post('/start', authenticate, async (req: Request, res: Response) => {
 // POST /walks/track (replaces WebSocket for serverless)
 router.post('/track', authenticate, async (req: Request, res: Response) => {
   try {
-    const { sessionId, latitude, longitude, speed, accuracy, isMock } = req.body;
+    const { sessionId, latitude, longitude, speed, accuracy, isMock, clientRequestId, clientEventAt } = req.body;
     const userId = req.user!.userId;
 
     if (!sessionId || latitude === undefined || longitude === undefined) {
@@ -449,18 +479,25 @@ router.post('/track', authenticate, async (req: Request, res: Response) => {
     }
 
     try {
-      await validateGPSUpdate(sessionId, userId, {
+      const trackResult = await validateGPSUpdate(sessionId, userId, {
         latitude,
         longitude,
         speed,
         accuracy,
-        isMock
+        isMock,
+        clientEventAt,
+        clientRequestId
       });
-      res.json({ success: true, status: 'validated' });
+      res.json({
+        success: true,
+        status: 'validated',
+        acceptedAt: trackResult.acceptedAt,
+        idempotentReplay: trackResult.idempotentReplay,
+      });
     } catch (err) {
       logger.error('Failed to validate GPS for session', err, { sessionId });
       // Still return 200 so the app doesn't crash on failed validation logs
-      res.json({ success: false, error: 'Validation failed' });
+      res.json({ success: false, error: 'Validation failed', acceptedAt: new Date().toISOString(), idempotentReplay: false });
     }
   } catch (error) {
     logger.error('Track error:', error);
@@ -471,21 +508,44 @@ router.post('/track', authenticate, async (req: Request, res: Response) => {
 // POST /walks/arrive
 router.post('/arrive', authenticate, async (req: Request, res: Response) => {
   try {
-    const { sessionId, locationId, latitude, longitude } = req.body;
-    const result = await arriveAtLocation({
-      sessionId,
-      locationId,
-      latitude,
-      longitude,
+    const { sessionId, locationId, latitude, longitude, clientRequestId, clientEventAt } = req.body;
+    const result = await executeIdempotentRequest({
+      idempotencyKey: typeof clientRequestId === 'string' ? clientRequestId : undefined,
+      endpoint: 'walks/arrive',
       userId: req.user!.userId,
+      payload: {
+        sessionId,
+        locationId,
+        latitude,
+        longitude,
+        clientEventAt,
+      },
+      execute: async () => {
+        const arrived = await arriveAtLocation({
+          sessionId,
+          locationId,
+          latitude,
+          longitude,
+          userId: req.user!.userId,
+        });
+
+        return {
+          statusCode: 200,
+          body: {
+            success: true,
+            withinRange: arrived.withinRange,
+            integrityScore: arrived.integrityScore,
+            location: arrived.location,
+            distance: arrived.distance,
+          },
+        };
+      }
     });
 
-    res.json({
-      success: true,
-      withinRange: result.withinRange,
-      integrityScore: result.integrityScore,
-      location: result.location,
-      distance: result.distance,
+    res.status(result.statusCode).json({
+      ...result.body,
+      acceptedAt: result.acceptedAt,
+      idempotentReplay: result.idempotentReplay,
     });
   } catch (error) {
     if (error instanceof DomainError) {
@@ -499,22 +559,48 @@ router.post('/arrive', authenticate, async (req: Request, res: Response) => {
 // POST /walks/complete
 router.post('/complete', authenticate, async (req: Request, res: Response) => {
   try {
-    const { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal } = req.body;
-    const result = await completeWalk({
-      sessionId,
-      locationId,
-      latitude,
-      longitude,
-      prayerSummary,
-      prayerJournal,
+    const { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal, clientRequestId, clientEventAt, localSessionId } = req.body;
+    const result = await executeIdempotentRequest({
+      idempotencyKey: typeof clientRequestId === 'string' ? clientRequestId : undefined,
+      endpoint: 'walks/complete',
       userId: req.user!.userId,
+      payload: {
+        sessionId,
+        locationId,
+        latitude,
+        longitude,
+        prayerSummary,
+        prayerJournal,
+        clientEventAt,
+        localSessionId,
+      },
+      execute: async () => {
+        const completed = await completeWalk({
+          sessionId,
+          locationId,
+          latitude,
+          longitude,
+          prayerSummary,
+          prayerJournal,
+          userId: req.user!.userId,
+        });
+
+        return {
+          statusCode: 200,
+          body: {
+            success: true,
+            trustScore: completed.trustScore,
+            pointsEarned: completed.pointsEarned,
+            badgesEarned: completed.badgesEarned
+          },
+        };
+      },
     });
 
-    res.json({
-      success: true,
-      trustScore: result.trustScore,
-      pointsEarned: result.pointsEarned,
-      badgesEarned: result.badgesEarned
+    res.status(result.statusCode).json({
+      ...result.body,
+      acceptedAt: result.acceptedAt,
+      idempotentReplay: result.idempotentReplay,
     });
 
   } catch (e) {

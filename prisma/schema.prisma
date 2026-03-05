@@ -97,17 +97,34 @@ model GPSEvent {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sessionId   String   @map("session_id") @db.Uuid
   timestamp   DateTime @default(now()) @db.Timestamptz(6)
+  eventAt     DateTime @default(now()) @map("event_at") @db.Timestamptz(6)
   location    String   @db.Text // GeoJSON Point
   speed       Decimal? @db.Decimal(10, 2) // m/s
   accuracy    Decimal? @db.Decimal(10, 2) // meters
   altitude    Decimal? @db.Decimal(10, 2) // meters
   isMock      Boolean  @default(false) @map("is_mock")
+  clientRequestId String? @map("client_request_id") @db.VarChar(64)
 
   // Relations
   session PrayerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId], map: "idx_gps_events_session_id")
+  @@unique([sessionId, clientRequestId], map: "uq_gps_events_session_client_request")
   @@map("gps_events")
+}
+
+model MobileSyncRequest {
+  idempotencyKey String   @id @map("idempotency_key") @db.VarChar(64)
+  userId         String   @map("user_id") @db.Uuid
+  endpoint       String   @db.VarChar(64)
+  requestHash    String   @map("request_hash") @db.VarChar(64)
+  responseCode   Int      @map("response_code")
+  responseJson   Json     @map("response_json")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId], map: "idx_mobile_sync_requests_user_id")
+  @@index([endpoint, createdAt], map: "idx_mobile_sync_requests_endpoint_created")
+  @@map("mobile_sync_requests")
 }
 
 model GPSFlag {

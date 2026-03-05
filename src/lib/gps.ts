@@ -12,10 +12,57 @@ export interface GPSUpdate {
     altitude?: number;
     isMock?: boolean;
     timestamp?: number;
+    clientEventAt?: string;
+    clientRequestId?: string;
 }
 
-export async function validateGPSUpdate(sessionId: string, userId: string, update: GPSUpdate) {
-    const { latitude, longitude, speed, isMock, accuracy } = update;
+type GPSValidationResult = {
+    acceptedAt: string;
+    idempotentReplay: boolean;
+};
+
+const MAX_EVENT_FUTURE_SKEW_MS = 15 * 60 * 1000;
+
+function parseClientEventAt(raw?: string): Date | null {
+    if (!raw || typeof raw !== 'string') return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+}
+
+export async function validateGPSUpdate(sessionId: string, userId: string, update: GPSUpdate): Promise<GPSValidationResult> {
+    const { latitude, longitude, speed, isMock, accuracy, clientEventAt, clientRequestId } = update;
+    const serverNow = new Date();
+    const normalizedClientRequestId = typeof clientRequestId === 'string'
+        ? clientRequestId.trim().slice(0, 64)
+        : '';
+
+    if (normalizedClientRequestId) {
+        const existingRows = await prisma.$queryRawUnsafe<Array<{ timestamp: Date }>>(
+            `SELECT "timestamp"
+             FROM gps_events
+             WHERE session_id = $1::uuid AND client_request_id = $2
+             LIMIT 1`,
+            sessionId,
+            normalizedClientRequestId
+        );
+        const existing = existingRows[0];
+        if (existing?.timestamp) {
+            return {
+                acceptedAt: new Date(existing.timestamp).toISOString(),
+                idempotentReplay: true,
+            };
+        }
+    }
+
+    const parsedClientEventAt = parseClientEventAt(clientEventAt);
+    let eventAt = parsedClientEventAt || serverNow;
+    let clockSkewAdjusted = false;
+
+    if (eventAt.getTime() - serverNow.getTime() > MAX_EVENT_FUTURE_SKEW_MS) {
+        eventAt = serverNow;
+        clockSkewAdjusted = true;
+    }
 
     // 1. Check for Mock Provider
     if (isMock) {
@@ -29,19 +76,35 @@ export async function validateGPSUpdate(sessionId: string, userId: string, updat
         // await flagSession(sessionId, userId, 'low_accuracy', 'low', `Accuracy: ${accuracy}m`);
     }
 
+    if (clockSkewAdjusted) {
+        await flagSession(
+            sessionId,
+            userId,
+            'clock_skew',
+            'low',
+            'Client event timestamp was too far in the future and was clamped to server time'
+        );
+    }
+
     // 3. Movement Physics (Compare with last event)
-    const lastEvent = await prisma.gPSEvent.findFirst({
-        where: { sessionId },
-        orderBy: { timestamp: 'desc' }
-    });
+    const lastRows = await prisma.$queryRawUnsafe<Array<{ location: string; event_at: Date; timestamp: Date }>>(
+        `SELECT location, event_at, "timestamp"
+         FROM gps_events
+         WHERE session_id = $1::uuid
+         ORDER BY event_at DESC
+         LIMIT 1`,
+        sessionId
+    );
+    const lastEvent = lastRows[0];
 
     if (lastEvent) {
         const lastLoc = JSON.parse(lastEvent.location);
         const lastLng = lastLoc.coordinates[0];
         const lastLat = lastLoc.coordinates[1];
+        const lastEventAt = new Date(lastEvent.event_at || lastEvent.timestamp);
 
         const distanceMeters = calculateDistance(lastLat, lastLng, latitude, longitude);
-        const timeSec = (Date.now() - new Date(lastEvent.timestamp).getTime()) / 1000;
+        const timeSec = (eventAt.getTime() - lastEventAt.getTime()) / 1000;
 
         if (timeSec > 0) {
             const calculatedSpeed = distanceMeters / timeSec;
@@ -55,18 +118,56 @@ export async function validateGPSUpdate(sessionId: string, userId: string, updat
     }
 
     // Record the actual event
-    await prisma.gPSEvent.create({
-        data: {
+    let acceptedAt = serverNow.toISOString();
+    let idempotentReplay = false;
+
+    if (normalizedClientRequestId) {
+        const dedupeRows = await prisma.$queryRawUnsafe<Array<{ timestamp: Date; inserted: boolean }>>(
+            `WITH ins AS (
+                INSERT INTO gps_events (session_id, event_at, location, speed, accuracy, is_mock, client_request_id)
+                VALUES ($1::uuid, $2::timestamptz, $3, $4, $5, $6, $7)
+                ON CONFLICT (session_id, client_request_id) WHERE client_request_id IS NOT NULL
+                DO NOTHING
+                RETURNING "timestamp", TRUE AS inserted
+            )
+            SELECT "timestamp", inserted FROM ins
+            UNION ALL
+            SELECT "timestamp", FALSE AS inserted
+            FROM gps_events
+            WHERE session_id = $1::uuid AND client_request_id = $7
+            LIMIT 1`,
             sessionId,
-            location: JSON.stringify({ type: 'Point', coordinates: [longitude, latitude] }),
-            speed: speed || null,
-            accuracy: accuracy || null,
-            isMock: isMock || false
-        }
-    });
+            eventAt.toISOString(),
+            JSON.stringify({ type: 'Point', coordinates: [longitude, latitude] }),
+            speed || null,
+            accuracy || null,
+            isMock || false,
+            normalizedClientRequestId
+        );
+        const row = dedupeRows[0];
+        if (row?.timestamp) acceptedAt = new Date(row.timestamp).toISOString();
+        idempotentReplay = row ? !row.inserted : false;
+    } else {
+        const inserted = await prisma.$queryRawUnsafe<Array<{ timestamp: Date }>>(
+            `INSERT INTO gps_events (session_id, event_at, location, speed, accuracy, is_mock, client_request_id)
+             VALUES ($1::uuid, $2::timestamptz, $3, $4, $5, $6, NULL)
+             RETURNING "timestamp"`,
+            sessionId,
+            eventAt.toISOString(),
+            JSON.stringify({ type: 'Point', coordinates: [longitude, latitude] }),
+            speed || null,
+            accuracy || null,
+            isMock || false
+        );
+        if (inserted[0]?.timestamp) acceptedAt = new Date(inserted[0].timestamp).toISOString();
+    }
 
     // Check route checkpoints
     await checkRouteProgress(sessionId, latitude, longitude);
+    return {
+        acceptedAt,
+        idempotentReplay
+    };
 }
 
 async function flagSession(sessionId: string, userId: string, type: string, severity: string, description: string) {

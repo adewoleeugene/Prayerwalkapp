@@ -10,6 +10,13 @@ import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '
 import { clearActiveWalkState, loadActiveWalkState, saveActiveWalkState } from '../../features/walk/storage/activeWalkStorage';
 import { ActiveWalkDrawer } from '../../features/walk/components/ActiveWalkDrawer';
 import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import {
+    completeWalkOnlineOrQueue,
+    startWalkOnlineOrQueue,
+    trackWalkOnlineOrQueue,
+} from '../../features/walk/offline/offlineWalkApi';
+import { getSyncStatusSnapshot, subscribeSyncStatus } from '../../features/walk/offline/syncEngine';
+import { SyncStatus } from '../../features/walk/offline/types';
 
 const { width, height } = Dimensions.get('window');
 const BRANCHES_CACHE_KEY = 'branches_cache_v1';
@@ -118,6 +125,17 @@ export default function MapScreen() {
     const [walkJourney, setWalkJourney] = useState('');
     const [isEndingWalk, setIsEndingWalk] = useState(false);
     const [activeRoutePoints, setActiveRoutePoints] = useState<Array<{ latitude: number; longitude: number }>>([]);
+    const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatusSnapshot());
+    const shouldShowSyncStatusText = !syncStatus.isOnline || syncStatus.isSyncing || syncStatus.pendingCount > 0 || !!syncStatus.error;
+    const syncStatusText = !syncStatus.isOnline
+        ? 'Offline'
+        : syncStatus.isSyncing
+            ? 'Syncing...'
+            : syncStatus.error
+                ? 'Sync error'
+                : syncStatus.pendingCount > 0
+                ? `${syncStatus.pendingCount} pending`
+                : 'Synced';
 
     const showLocationAccessAlert = (reason: 'services_disabled' | 'permission_denied') => {
         if (reason === 'services_disabled') {
@@ -162,6 +180,11 @@ export default function MapScreen() {
             keyboardWillShow.remove();
             keyboardWillHide.remove();
         };
+    }, []);
+
+    useEffect(() => {
+        const unsubscribe = subscribeSyncStatus(setSyncStatus);
+        return unsubscribe;
     }, []);
 
     // Open/Close Drawer Animation
@@ -248,6 +271,16 @@ export default function MapScreen() {
                         },
                         400
                     );
+                    void trackWalkOnlineOrQueue({
+                        sessionId: activeWalk.sessionId,
+                        latitude: loc.coords.latitude,
+                        longitude: loc.coords.longitude,
+                        speed: loc.coords.speed || undefined,
+                        accuracy: loc.coords.accuracy || undefined,
+                        isMock: (loc.coords as any).mocked || false,
+                    }).catch((err) => {
+                        console.log('Track enqueue/send failed', err);
+                    });
                 }
             );
 
@@ -606,15 +639,15 @@ export default function MapScreen() {
                 // Keep previously known location/address fallback.
             }
 
-            const res = await api.walks.start(
-                targetLocation?.id,
-                startLatitude,
-                startLongitude,
-                fingerprint,
-                branchForStart,
-                normalizedParticipants,
-                startAddressLabel
-            );
+            const res = await startWalkOnlineOrQueue({
+                locationId: targetLocation?.id,
+                latitude: startLatitude,
+                longitude: startLongitude,
+                deviceFingerprint: fingerprint,
+                branch: branchForStart,
+                participants: normalizedParticipants,
+                startAddress: startAddressLabel,
+            });
 
             setDrawerVisible(false);
             setParticipants([]);
@@ -633,6 +666,9 @@ export default function MapScreen() {
                 setActiveWalk(nextActiveWalk);
                 await saveActiveWalkState(nextActiveWalk);
                 fetchWalkHistory();
+                if (res.data.queued) {
+                    Alert.alert('Offline Start', 'Walk started offline. Data will sync automatically when internet returns.');
+                }
             } else {
                 Alert.alert('Error', res.data.error || 'Could not start walk');
             }
@@ -713,14 +749,13 @@ export default function MapScreen() {
             }
 
             const journey = walkJourney.trim();
-            const res = await api.walks.complete(
-                activeWalk.sessionId,
-                activeWalk.targetLocation?.id,
+            const res = await completeWalkOnlineOrQueue({
+                sessionId: activeWalk.sessionId,
+                locationId: activeWalk.targetLocation?.id,
                 latitude,
                 longitude,
-                undefined,
-                includeJourney && journey.length > 0 ? journey : undefined
-            );
+                prayerJournal: includeJourney && journey.length > 0 ? journey : undefined,
+            });
 
             if (!res.data?.success) {
                 throw new Error(res.data?.error || 'Failed to complete walk');
@@ -737,7 +772,12 @@ export default function MapScreen() {
             setStoppedElapsedSeconds(null);
             await clearActiveWalkState();
             fetchWalkHistory();
-            Alert.alert('Walk Ended', 'Your walk has been completed.');
+            Alert.alert(
+                'Walk Ended',
+                res.data?.queued
+                    ? 'Walk completed offline. It will sync automatically when internet returns.'
+                    : 'Your walk has been completed.'
+            );
         } catch (e: any) {
             const errorMessage = e.response?.data?.error || e.message || 'Failed to complete walk';
             Alert.alert('Error', errorMessage);
@@ -776,12 +816,13 @@ export default function MapScreen() {
                         const strokeColor = walk.walkType === 'area'
                             ? `rgba(38, 132, 255, ${strokeOpacity})`
                             : `rgba(255, 59, 48, ${strokeOpacity})`;
+                        const trackPoints = walk.points;
 
-                        if (walk.geometryType === 'path' && walk.points.length > 1) {
+                        if (walk.geometryType === 'path' && trackPoints.length > 1) {
                             return (
                                 <React.Fragment key={walk.sessionId}>
                                     <Polyline
-                                        coordinates={walk.points}
+                                        coordinates={trackPoints}
                                         strokeColor={strokeColor}
                                         strokeWidth={7}
                                         geodesic
@@ -791,7 +832,7 @@ export default function MapScreen() {
                                         onPress={() => openHistoryDetails(walk)}
                                     />
                                     <Marker
-                                        coordinate={walk.points[walk.points.length - 1]}
+                                        coordinate={trackPoints[trackPoints.length - 1]}
                                         title={toHistoryLabel(walk)}
                                         pinColor={walk.walkType === 'area' ? '#1C7ED6' : '#E03131'}
                                         onPress={() => openHistoryDetails(walk)}
@@ -879,12 +920,19 @@ export default function MapScreen() {
                 </TouchableOpacity>
 
                 {!activeWalk && (
-                    <TouchableOpacity
-                        style={styles.fabStartButton}
-                        onPress={() => openStartDrawer()}
-                    >
-                        <Text style={styles.fabStartText}>Start Prayer Walk</Text>
-                    </TouchableOpacity>
+                    <>
+                        {shouldShowSyncStatusText && (
+                            <View style={styles.bottomSyncBannerWrap}>
+                                <Text style={styles.bottomSyncStatusText}>{syncStatusText}</Text>
+                            </View>
+                        )}
+                        <TouchableOpacity
+                            style={styles.fabStartButton}
+                            onPress={() => openStartDrawer()}
+                        >
+                            <Text style={styles.fabStartText}>Start Prayer Walk</Text>
+                        </TouchableOpacity>
+                    </>
                 )}
             </View>
 
@@ -1110,9 +1158,20 @@ const styles = StyleSheet.create({
     },
     filtersWrap: {
         position: 'absolute',
-        top: 52,
+        top: 108,
         left: 14,
         right: 14,
+    },
+    bottomSyncBannerWrap: {
+        alignSelf: 'center',
+        width: '86%',
+        marginBottom: 10,
+        alignItems: 'center',
+    },
+    bottomSyncStatusText: {
+        color: '#1F2937',
+        fontSize: 12,
+        fontWeight: '700',
     },
     filtersRow: {
         paddingRight: 24,

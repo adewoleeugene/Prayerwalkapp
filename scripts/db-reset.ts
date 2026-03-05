@@ -213,6 +213,7 @@ async function main() {
         'DROP TABLE IF EXISTS gps_flags            CASCADE',
         'DROP TABLE IF EXISTS "GPSEvent"           CASCADE',
         'DROP TABLE IF EXISTS gps_events           CASCADE',
+        'DROP TABLE IF EXISTS mobile_sync_requests CASCADE',
         'DROP TABLE IF EXISTS completions          CASCADE',
         'DROP TABLE IF EXISTS "Completion"         CASCADE',
         'DROP TABLE IF EXISTS "RouteCheckpoint"    CASCADE',

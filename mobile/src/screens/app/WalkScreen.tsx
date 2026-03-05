@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput, Platform, Animated } from 'react-native';
 import * as Location from 'expo-location';
 import MapView, { Marker, Polyline } from 'react-native-maps';
-import { api } from '../../api/client';
 import { useNavigation } from '@react-navigation/native';
 import { Navigation, MapPin, CheckCircle, Check, PenLine, AlignLeft } from 'lucide-react-native';
 import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
@@ -10,6 +9,14 @@ import { WalkLiveStatsRow } from '../../features/walk/components/WalkLiveStatsRo
 import { TeamMembersCard } from '../../features/walk/components/TeamMembersCard';
 import { WalkSummaryStatsGrid } from '../../features/walk/components/WalkSummaryStatsGrid';
 import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import { SyncBanner } from '../../features/walk/components/SyncBanner';
+import {
+    arriveOnlineOrQueue,
+    completeWalkOnlineOrQueue,
+    trackWalkOnlineOrQueue,
+} from '../../features/walk/offline/offlineWalkApi';
+import { getSyncStatusSnapshot, subscribeSyncStatus, triggerOfflineSync } from '../../features/walk/offline/syncEngine';
+import { SyncStatus } from '../../features/walk/offline/types';
 
 export default function WalkScreen({ route }: { route: any }) {
     const { session, targetLocation } = route.params;
@@ -31,6 +38,7 @@ export default function WalkScreen({ route }: { route: any }) {
         routePoints: Array<{ latitude: number; longitude: number }>;
     } | null>(null);
     const [canShowUserLocation, setCanShowUserLocation] = useState(false);
+    const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatusSnapshot());
 
     const metersToKm = (meters: number) => (meters / 1000).toFixed(2);
 
@@ -102,6 +110,11 @@ export default function WalkScreen({ route }: { route: any }) {
     }, [isTimerRunning]);
 
     useEffect(() => {
+        const unsubscribe = subscribeSyncStatus(setSyncStatus);
+        return unsubscribe;
+    }, []);
+
+    useEffect(() => {
         elapsedSecondsRef.current = elapsedSeconds;
     }, [elapsedSeconds]);
 
@@ -154,21 +167,27 @@ export default function WalkScreen({ route }: { route: any }) {
 
         // Use REST endpoint for serverless tracking instead of websocket
         try {
-            api.walks.track(
-                sessionIdRef.current,
+            trackWalkOnlineOrQueue({
+                sessionId: sessionIdRef.current,
                 latitude,
                 longitude,
-                speed,
-                accuracy,
-                mockAdvertised || false
-            ).catch((e: any) => console.log('Location update error:', e));
+                speed: speed || undefined,
+                accuracy: accuracy || undefined,
+                isMock: mockAdvertised || false
+            }).catch((e: any) => console.log('Location update error:', e));
         } catch (e: any) {
             console.error('Track call error:', e);
         }
 
         try {
             if (targetLocation && !isArrived) {
-                const res = await api.walks.arrive(sessionIdRef.current, targetLocation.id, latitude, longitude);
+                const res = await arriveOnlineOrQueue({
+                    sessionId: sessionIdRef.current,
+                    locationId: targetLocation.id,
+                    latitude,
+                    longitude,
+                    targetLocation,
+                });
 
                 if (res.data.withinRange) {
                     setIsArrived(true);
@@ -206,14 +225,14 @@ export default function WalkScreen({ route }: { route: any }) {
                 throw new Error('Location unavailable');
             }
 
-            const res = await api.walks.complete(
-                sessionIdRef.current,
-                targetLocation?.id,
+            const res = await completeWalkOnlineOrQueue({
+                sessionId: sessionIdRef.current,
+                locationId: targetLocation?.id,
                 latitude,
                 longitude,
-                prayerSummary.trim() || undefined,
-                prayerJournal.trim() || undefined
-            );
+                prayerSummary: prayerSummary.trim() || undefined,
+                prayerJournal: prayerJournal.trim() || undefined
+            });
 
             if (res.data.success) {
                 if (locationSubscription.current) locationSubscription.current.remove();
@@ -228,6 +247,9 @@ export default function WalkScreen({ route }: { route: any }) {
             } else {
                 Alert.alert('Validation Error', res.data.error || 'Walk completion failed.');
                 setIsTimerRunning(true);
+            }
+            if (res.data?.queued) {
+                Alert.alert('Offline Completion', 'Walk completion was saved offline and will sync automatically.');
             }
         } catch (e: any) {
             const errorMessage = e.response?.data?.error || (e.message === 'Location unavailable'
@@ -301,6 +323,15 @@ export default function WalkScreen({ route }: { route: any }) {
 
     return (
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            <View style={{ marginBottom: 12 }}>
+                <SyncBanner
+                    status={syncStatus}
+                    onRetry={() => {
+                        void triggerOfflineSync('manual');
+                    }}
+                />
+            </View>
+
             {/* Header Area */}
             <View style={styles.headerContainer}>
                 <Text style={styles.title}>{targetLocation?.name || 'Open Prayer Walk'}</Text>
