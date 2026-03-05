@@ -1,10 +1,19 @@
 import { PrismaClient } from '@prisma/client';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const runtimeDatabaseUrl =
+  process.env.NODE_ENV === 'test'
+    ? (testDatabaseUrl || databaseUrl)
+    : databaseUrl;
 
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
+    ...(runtimeDatabaseUrl
+      ? { datasources: { db: { url: runtimeDatabaseUrl } } }
+      : {}),
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 

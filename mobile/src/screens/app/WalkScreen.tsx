@@ -2,14 +2,17 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput, Platform, Animated } from 'react-native';
 import * as Location from 'expo-location';
 import MapView, { Marker, Polyline } from 'react-native-maps';
-import { api, getWebSocketUrl } from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
+import { api } from '../../api/client';
 import { useNavigation } from '@react-navigation/native';
-import { Clock, Navigation, MapPin, CheckCircle, Navigation2, Check, PenLine, AlignLeft } from 'lucide-react-native';
+import { Navigation, MapPin, CheckCircle, Check, PenLine, AlignLeft } from 'lucide-react-native';
+import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
+import { WalkLiveStatsRow } from '../../features/walk/components/WalkLiveStatsRow';
+import { TeamMembersCard } from '../../features/walk/components/TeamMembersCard';
+import { WalkSummaryStatsGrid } from '../../features/walk/components/WalkSummaryStatsGrid';
+import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
 
 export default function WalkScreen({ route }: { route: any }) {
-    const { session, targetLocation, fingerprint } = route.params;
-    const { token } = useAuth();
+    const { session, targetLocation } = route.params;
     const navigation = useNavigation<any>();
     const [distance, setDistance] = useState<number | null>(null);
     const [participants, setParticipants] = useState<string[]>([]);
@@ -27,30 +30,17 @@ export default function WalkScreen({ route }: { route: any }) {
         distanceMeters: number;
         routePoints: Array<{ latitude: number; longitude: number }>;
     } | null>(null);
-
-    const formatDuration = (totalSeconds: number) => {
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
-    };
+    const [canShowUserLocation, setCanShowUserLocation] = useState(false);
 
     const metersToKm = (meters: number) => (meters / 1000).toFixed(2);
 
-    const calculateDistanceMeters = (
-        a: { latitude: number; longitude: number },
-        b: { latitude: number; longitude: number }
-    ) => {
-        const toRad = (deg: number) => (deg * Math.PI) / 180;
-        const R = 6371e3;
-        const dLat = toRad(b.latitude - a.latitude);
-        const dLng = toRad(b.longitude - a.longitude);
-        const lat1 = toRad(a.latitude);
-        const lat2 = toRad(b.latitude);
-        const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-        return R * c;
+    const showLocationAccessAlert = (reason: 'services_disabled' | 'permission_denied') => {
+        if (reason === 'services_disabled') {
+            Alert.alert('Location Disabled', 'Turn on device location services (GPS) and try again.');
+            return;
+        }
+
+        Alert.alert('Permission Denied', 'Location permission is required to track this walk.');
     };
 
     const getTargetCoords = () => {
@@ -75,10 +65,7 @@ export default function WalkScreen({ route }: { route: any }) {
     useEffect(() => {
         if (session.participants) {
             try {
-                const parsed = typeof session.participants === 'string'
-                    ? JSON.parse(session.participants)
-                    : session.participants;
-                setParticipants(Array.isArray(parsed) ? parsed : []);
+                setParticipants(parseParticipantsLike(session.participants));
             } catch (e) {
                 setParticipants([]);
             }
@@ -87,7 +74,6 @@ export default function WalkScreen({ route }: { route: any }) {
 
     const [isArrived, setIsArrived] = useState(false);
     const [prayerContent, setPrayerContent] = useState<any>(null);
-    const ws = useRef<WebSocket | null>(null);
     const locationSubscription = useRef<Location.LocationSubscription | null>(null);
     const sessionIdRef = useRef(session.id);
     const elapsedSecondsRef = useRef(0);
@@ -99,7 +85,6 @@ export default function WalkScreen({ route }: { route: any }) {
         startTracking();
 
         return () => {
-            if (ws.current) ws.current.close();
             if (locationSubscription.current) locationSubscription.current.remove();
         };
     }, []);
@@ -133,9 +118,17 @@ export default function WalkScreen({ route }: { route: any }) {
     }, [currentLocation]);
 
     const startTracking = async () => {
+        const access = await ensureForegroundLocationAccess();
+        if (!access.ok) {
+            setCanShowUserLocation(false);
+            showLocationAccessAlert(access.reason);
+            return;
+        }
+        setCanShowUserLocation(true);
+
         const sub = await Location.watchPositionAsync(
             {
-                accuracy: Location.Accuracy.High,
+                accuracy: Location.Accuracy.Balanced,
                 timeInterval: 3000,
                 distanceInterval: 10,
             },
@@ -199,9 +192,10 @@ export default function WalkScreen({ route }: { route: any }) {
         let longitude = currentLocationRef.current?.longitude;
 
         try {
+            const shouldWaitForGpsFix = latitude === undefined || longitude === undefined;
             const liveLoc = await Promise.race([
                 Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-                new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), shouldWaitForGpsFix ? 5000 : 1200)),
             ]);
             if (liveLoc) {
                 latitude = liveLoc.coords.latitude;
@@ -222,7 +216,6 @@ export default function WalkScreen({ route }: { route: any }) {
             );
 
             if (res.data.success) {
-                if (ws.current) ws.current.close();
                 if (locationSubscription.current) locationSubscription.current.remove();
                 setWalkSummary({
                     pointsEarned: Number(res.data.pointsEarned || 0),
@@ -289,23 +282,12 @@ export default function WalkScreen({ route }: { route: any }) {
                     </View>
                 )}
 
-                <View style={styles.statsGrid}>
-                    <View style={styles.statBox}>
-                        <Clock size={24} color="#6366F1" />
-                        <Text style={styles.statValue}>{formatDuration(walkSummary.durationSeconds)}</Text>
-                        <Text style={styles.statLabel}>Duration</Text>
-                    </View>
-                    <View style={styles.statBox}>
-                        <Navigation2 size={24} color="#10B981" />
-                        <Text style={styles.statValue}>{metersToKm(walkSummary.distanceMeters)}</Text>
-                        <Text style={styles.statLabel}>KM</Text>
-                    </View>
-                    <View style={styles.statBox}>
-                        <CheckCircle size={24} color="#F59E0B" />
-                        <Text style={styles.statValue}>{walkSummary.pointsEarned}</Text>
-                        <Text style={styles.statLabel}>XP Earned</Text>
-                    </View>
-                </View>
+                <WalkSummaryStatsGrid
+                    durationLabel={formatDuration(walkSummary.durationSeconds)}
+                    distanceKmLabel={metersToKm(walkSummary.distanceMeters)}
+                    pointsEarned={walkSummary.pointsEarned}
+                    styles={styles}
+                />
 
                 <TouchableOpacity
                     style={[styles.primaryButton, { marginTop: 32 }]}
@@ -326,30 +308,14 @@ export default function WalkScreen({ route }: { route: any }) {
             </View>
 
             {/* Live Stats Row */}
-            <View style={styles.liveStatsRow}>
-                <View style={styles.liveStatItem}>
-                    <Clock size={20} color="#6366F1" />
-                    <Text style={styles.liveStatText}>{formatDuration(elapsedSeconds)}</Text>
-                </View>
-                <View style={styles.liveStatItem}>
-                    <Navigation2 size={20} color="#10B981" />
-                    <Text style={styles.liveStatText}>{metersToKm(distanceWalkedMeters)} km</Text>
-                </View>
-            </View>
+            <WalkLiveStatsRow
+                elapsedLabel={formatDuration(elapsedSeconds)}
+                distanceKmLabel={metersToKm(distanceWalkedMeters)}
+                styles={styles}
+            />
 
             {/* Team Area */}
-            {participants.length > 0 && (
-                <View style={[styles.card, styles.teamCard]}>
-                    <Text style={styles.cardSectionTitle}>Team Members</Text>
-                    <View style={styles.teamList}>
-                        {participants.map((p, i) => (
-                            <View key={i} style={styles.teamBadge}>
-                                <Text style={styles.teamText}>{p}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </View>
-            )}
+            <TeamMembersCard participants={participants} styles={styles} />
 
             {/* Map Area */}
             {currentLocation && (
@@ -368,7 +334,7 @@ export default function WalkScreen({ route }: { route: any }) {
                             latitudeDelta: 0.005,
                             longitudeDelta: 0.005,
                         }}
-                        showsUserLocation
+                        showsUserLocation={canShowUserLocation}
                         userInterfaceStyle="light"
                     >
                         {routePoints.length > 1 && (

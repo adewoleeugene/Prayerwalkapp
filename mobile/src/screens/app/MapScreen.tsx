@@ -5,10 +5,20 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LocateFixed } from 'lucide-react-native';
 import { api } from '../../api/client';
+import { useWalkTimer } from '../../features/walk/hooks/useWalkTimer';
+import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
+import { clearActiveWalkState, loadActiveWalkState, saveActiveWalkState } from '../../features/walk/storage/activeWalkStorage';
+import { ActiveWalkDrawer } from '../../features/walk/components/ActiveWalkDrawer';
+import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
 
 const { width, height } = Dimensions.get('window');
 const BRANCHES_CACHE_KEY = 'branches_cache_v1';
-const ACTIVE_WALK_CACHE_KEY = 'active_walk_state_v1';
+const DEFAULT_REGION = {
+    latitude: 8.4657,
+    longitude: -13.2317,
+    latitudeDelta: 0.12,
+    longitudeDelta: 0.12,
+};
 
 type WalkTypeFilter = 'all' | 'path' | 'area';
 
@@ -32,6 +42,39 @@ type WalkHistoryItem = {
     opacity: number;
     points: Array<{ latitude: number; longitude: number }>;
 };
+
+function isValidCoordinate(latitude: number, longitude: number): boolean {
+    return Number.isFinite(latitude)
+        && Number.isFinite(longitude)
+        && latitude >= -90
+        && latitude <= 90
+        && longitude >= -180
+        && longitude <= 180;
+}
+
+function normalizeCoordinate(input: any): { latitude: number; longitude: number } | null {
+    if (!input) return null;
+
+    const latitude = Number(input.latitude);
+    const longitude = Number(input.longitude);
+    if (!isValidCoordinate(latitude, longitude)) return null;
+
+    return { latitude, longitude };
+}
+
+function parseLocationCoordinates(raw: any): { latitude: number; longitude: number } | null {
+    if (!raw) return null;
+
+    if (Array.isArray(raw)) {
+        if (raw.length < 2) return null;
+        const latitude = Number(raw[1]);
+        const longitude = Number(raw[0]);
+        if (!isValidCoordinate(latitude, longitude)) return null;
+        return { latitude, longitude };
+    }
+
+    return normalizeCoordinate(raw);
+}
 
 export default function MapScreen() {
     const mapRef = useRef<MapView | null>(null);
@@ -68,52 +111,21 @@ export default function MapScreen() {
         participants: string[];
         startedAt: string;
     } | null>(null);
-    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [canShowUserLocation, setCanShowUserLocation] = useState(false);
     const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
+    const elapsedSeconds = useWalkTimer(activeWalk?.startedAt, Boolean(activeWalk) && stoppedElapsedSeconds === null);
     const [endWalkModalVisible, setEndWalkModalVisible] = useState(false);
     const [walkJourney, setWalkJourney] = useState('');
     const [isEndingWalk, setIsEndingWalk] = useState(false);
     const [activeRoutePoints, setActiveRoutePoints] = useState<Array<{ latitude: number; longitude: number }>>([]);
 
-    const parseParticipantsLike = (participantsLike: unknown): string[] => {
-        if (!participantsLike) return [];
-        if (Array.isArray(participantsLike)) {
-            return participantsLike.map((name) => String(name).trim()).filter(Boolean);
+    const showLocationAccessAlert = (reason: 'services_disabled' | 'permission_denied') => {
+        if (reason === 'services_disabled') {
+            Alert.alert('Location Disabled', 'Turn on device location services (GPS) and try again.');
+            return;
         }
-        if (typeof participantsLike === 'string') {
-            try {
-                const parsed = JSON.parse(participantsLike);
-                if (Array.isArray(parsed)) {
-                    return parsed.map((name) => String(name).trim()).filter(Boolean);
-                }
-            } catch {
-                return participantsLike.split(',').map((name) => name.trim()).filter(Boolean);
-            }
-        }
-        return [];
-    };
 
-    const formatDuration = (totalSeconds: number) => {
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
-    };
-
-    const calculateDistanceMeters = (
-        a: { latitude: number; longitude: number },
-        b: { latitude: number; longitude: number }
-    ) => {
-        const toRad = (deg: number) => (deg * Math.PI) / 180;
-        const R = 6371e3;
-        const dLat = toRad(b.latitude - a.latitude);
-        const dLng = toRad(b.longitude - a.longitude);
-        const lat1 = toRad(a.latitude);
-        const lat2 = toRad(b.latitude);
-        const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-        return R * c;
+        Alert.alert('Permission Denied', 'Location permission is required to use this app.');
     };
 
     const applyBranchState = (names: string[]) => {
@@ -170,24 +182,6 @@ export default function MapScreen() {
     }, [drawerVisible]);
 
     useEffect(() => {
-        if (!activeWalk) {
-            setElapsedSeconds(0);
-            setStoppedElapsedSeconds(null);
-            return;
-        }
-        if (stoppedElapsedSeconds !== null) return;
-        const startedAtMs = new Date(activeWalk.startedAt).getTime();
-        const tick = () => {
-            const nowMs = Date.now();
-            const nextElapsed = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
-            setElapsedSeconds(nextElapsed);
-        };
-        tick();
-        const interval = setInterval(tick, 1000);
-        return () => clearInterval(interval);
-    }, [activeWalk, stoppedElapsedSeconds]);
-
-    useEffect(() => {
         let cancelled = false;
 
         const stopTracking = () => {
@@ -203,6 +197,15 @@ export default function MapScreen() {
                 setActiveRoutePoints([]);
                 return;
             }
+
+            const access = await ensureForegroundLocationAccess();
+            if (!access.ok) {
+                setCanShowUserLocation(false);
+                showLocationAccessAlert(access.reason);
+                await fetchBranches();
+                return;
+            }
+            setCanShowUserLocation(true);
 
             if (location?.coords) {
                 setActiveRoutePoints([{ latitude: location.coords.latitude, longitude: location.coords.longitude }]);
@@ -222,7 +225,7 @@ export default function MapScreen() {
             stopTracking();
             const sub = await Location.watchPositionAsync(
                 {
-                    accuracy: Location.Accuracy.BestForNavigation,
+                    accuracy: Location.Accuracy.Balanced,
                     timeInterval: 2000,
                     distanceInterval: 3,
                 },
@@ -275,9 +278,9 @@ export default function MapScreen() {
 
             // Restore active walk state after app refresh/restart.
             try {
-                const cachedActiveWalk = await AsyncStorage.getItem(ACTIVE_WALK_CACHE_KEY);
+                const cachedActiveWalk = await loadActiveWalkState<any>();
                 if (cachedActiveWalk) {
-                    const parsed = JSON.parse(cachedActiveWalk);
+                    const parsed = cachedActiveWalk;
                     if (parsed?.sessionId && parsed?.startedAt) {
                         setActiveWalk({
                             sessionId: String(parsed.sessionId),
@@ -307,14 +310,40 @@ export default function MapScreen() {
                 console.log('Branch cache error', e);
             }
 
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'GPS is required to use this app.');
+            const access = await ensureForegroundLocationAccess();
+            if (!access.ok) {
+                setCanShowUserLocation(false);
+                showLocationAccessAlert(access.reason);
                 return;
             }
+            setCanShowUserLocation(true);
 
-            let userLocation = await Location.getCurrentPositionAsync({});
-            setLocation(userLocation);
+            let userLocation: Location.LocationObject | null = await Location.getLastKnownPositionAsync();
+            if (userLocation) {
+                setLocation(userLocation as any);
+            }
+
+            try {
+                const fresh = await Promise.race([
+                    Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.Balanced,
+                    }),
+                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+                ]);
+
+                if (fresh) {
+                    userLocation = fresh;
+                    setLocation(fresh);
+                }
+            } catch {
+                // Keep last known fallback when fresh lookup fails.
+            }
+
+            if (!userLocation) {
+                await fetchBranches();
+                Alert.alert('Location Pending', 'Map loaded. Turn on Wi-Fi/mobile data to improve first location fix.');
+                return;
+            }
 
             // Reverse Geocode Logic
             try {
@@ -344,7 +373,12 @@ export default function MapScreen() {
             try {
                 const cached = await AsyncStorage.getItem('locations_cache');
                 if (cached) {
-                    setLocations(JSON.parse(cached));
+                    const parsed = JSON.parse(cached);
+                    const normalized = (Array.isArray(parsed) ? parsed : []).filter((loc: any) => {
+                        const coords = parseLocationCoordinates(loc?.location?.coordinates || loc?.location);
+                        return Boolean(coords);
+                    });
+                    setLocations(normalized);
                 }
             } catch (e) {
                 console.log('Cache error', e);
@@ -398,23 +432,30 @@ export default function MapScreen() {
         try {
             // Production-grade: Limited radius for performance
             const res = await api.locations.list(lat, lng, 5000);
-            setLocations(res.data.locations);
-            await AsyncStorage.setItem('locations_cache', JSON.stringify(res.data.locations));
+            const normalized = (Array.isArray(res.data?.locations) ? res.data.locations : []).filter((loc: any) => {
+                const coords = parseLocationCoordinates(loc?.location?.coordinates || loc?.location);
+                return Boolean(coords);
+            });
+            setLocations(normalized);
+            await AsyncStorage.setItem('locations_cache', JSON.stringify(normalized));
         } catch (e) {
             console.error('Failed to fetch locations', e);
         }
     };
 
-    const fetchBranches = async (lat: number, lng: number) => {
+    const fetchBranches = async (lat?: number, lng?: number) => {
         try {
-            const nearbyRes = await api.branches.list(lat, lng, 80000);
-            const nearby = Array.isArray(nearbyRes.data?.branches) ? nearbyRes.data.branches : [];
+            const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+            if (hasCoords) {
+                const nearbyRes = await api.branches.list(lat, lng, 80000);
+                const nearby = Array.isArray(nearbyRes.data?.branches) ? nearbyRes.data.branches : [];
 
-            if (nearby.length > 0) {
-                const names = nearby.map((b: any) => String(b.name));
-                applyBranchState(names);
-                await AsyncStorage.setItem(BRANCHES_CACHE_KEY, JSON.stringify(names));
-                return;
+                if (nearby.length > 0) {
+                    const names = nearby.map((b: any) => String(b.name));
+                    applyBranchState(names);
+                    await AsyncStorage.setItem(BRANCHES_CACHE_KEY, JSON.stringify(names));
+                    return;
+                }
             }
 
             const allRes = await api.branches.list();
@@ -462,10 +503,9 @@ export default function MapScreen() {
                     prayerFocus: item.prayerFocus || 'Open Prayer Walk',
                     opacity: Number(item.opacity ?? 0.5),
                     points: Array.isArray(item.points)
-                        ? item.points.map((p: any) => ({
-                            latitude: Number(p.latitude),
-                            longitude: Number(p.longitude)
-                        }))
+                        ? item.points
+                            .map((p: any) => normalizeCoordinate(p))
+                            .filter((p: any) => Boolean(p))
                         : []
                 }))
                 .filter((item) => item.points.length > 0);
@@ -489,6 +529,11 @@ export default function MapScreen() {
         if (activeWalk) {
             Alert.alert('Walk Active', 'Please end the current walk before starting another.');
             return;
+        }
+        if (sortedBranches.length === 0) {
+            const lat = location?.coords.latitude;
+            const lng = location?.coords.longitude;
+            fetchBranches(lat, lng);
         }
         setTargetLocation(loc || null);
         setDrawerVisible(true);
@@ -535,7 +580,9 @@ export default function MapScreen() {
 
             // Capture a fresh start point/address at button press time.
             try {
-                const latestLocation = await Location.getCurrentPositionAsync({});
+                const latestLocation = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.Balanced,
+                });
                 startLatitude = latestLocation.coords.latitude;
                 startLongitude = latestLocation.coords.longitude;
 
@@ -583,7 +630,7 @@ export default function MapScreen() {
                     startedAt: String(session?.startTime || new Date().toISOString()),
                 };
                 setActiveWalk(nextActiveWalk);
-                await AsyncStorage.setItem(ACTIVE_WALK_CACHE_KEY, JSON.stringify(nextActiveWalk));
+                await saveActiveWalkState(nextActiveWalk);
                 fetchWalkHistory();
             } else {
                 Alert.alert('Error', res.data.error || 'Could not start walk');
@@ -623,7 +670,7 @@ export default function MapScreen() {
     const recenterToCurrentLocation = async () => {
         try {
             const latestLocation = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Highest,
+                accuracy: Location.Accuracy.Balanced,
             });
 
             setLocation(latestLocation);
@@ -649,9 +696,10 @@ export default function MapScreen() {
         let longitude = location?.coords.longitude;
 
         try {
+            const shouldWaitForGpsFix = latitude === undefined || longitude === undefined;
             const liveLoc = await Promise.race([
                 Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-                new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), shouldWaitForGpsFix ? 5000 : 1200)),
             ]);
             if (liveLoc) {
                 latitude = liveLoc.coords.latitude;
@@ -685,9 +733,8 @@ export default function MapScreen() {
             }
             setActiveRoutePoints([]);
             setActiveWalk(null);
-            setElapsedSeconds(0);
             setStoppedElapsedSeconds(null);
-            await AsyncStorage.removeItem(ACTIVE_WALK_CACHE_KEY);
+            await clearActiveWalkState();
             fetchWalkHistory();
             Alert.alert('Walk Ended', 'Your walk has been completed.');
         } catch (e: any) {
@@ -700,20 +747,19 @@ export default function MapScreen() {
 
     return (
         <View style={styles.container}>
-            {location ? (
-                <MapView
-                    ref={(ref) => { mapRef.current = ref; }}
-                    style={styles.map}
-                    initialRegion={{
-                        latitude: location.coords.latitude,
-                        longitude: location.coords.longitude,
-                        latitudeDelta: 0.05,
-                        longitudeDelta: 0.05,
-                    }}
-                    showsUserLocation={true}
-                    showsMyLocationButton={false}
-                    followsUserLocation={!!activeWalk}
-                >
+            <MapView
+                ref={(ref) => { mapRef.current = ref; }}
+                style={styles.map}
+                initialRegion={location ? {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                    latitudeDelta: 0.05,
+                    longitudeDelta: 0.05,
+                } : DEFAULT_REGION}
+                showsUserLocation={canShowUserLocation}
+                showsMyLocationButton={false}
+                followsUserLocation={!!activeWalk && !!location}
+            >
                     {activeWalk && activeRoutePoints.length > 1 && (
                         <Polyline
                             coordinates={activeRoutePoints}
@@ -767,15 +813,13 @@ export default function MapScreen() {
                     })}
 
                     {locations.map((loc) => {
-                        const coords = loc.location?.coordinates || loc.location;
-                        if (!coords) return null;
-                        const lat = Array.isArray(coords) ? coords[1] : coords.latitude;
-                        const lng = Array.isArray(coords) ? coords[0] : coords.longitude;
+                        const coordinate = parseLocationCoordinates(loc.location?.coordinates || loc.location);
+                        if (!coordinate) return null;
 
                         return (
                             <Marker
                                 key={loc.id}
-                                coordinate={{ latitude: Number(lat), longitude: Number(lng) }}
+                                coordinate={coordinate}
                             >
                                 <Callout onPress={() => openStartDrawer(loc)}>
                                     <View style={styles.callout}>
@@ -789,10 +833,11 @@ export default function MapScreen() {
                             </Marker>
                         );
                     })}
-                </MapView>
-            ) : (
+            </MapView>
+
+            {!location && (
                 <View style={styles.loading}>
-                    <Text>Connecting to Satellites...</Text>
+                    <Text>Connecting to location services...</Text>
                 </View>
             )}
 
@@ -918,36 +963,16 @@ export default function MapScreen() {
             </Animated.View>
 
             {activeWalk && (
-                <View style={styles.activeWalkDrawer}>
-                    <View style={styles.activeWalkHeader}>
-                        <Text style={styles.activeWalkTitle}>Walk in Progress</Text>
-                        <Text style={styles.activeWalkTimer}>{formatDuration(stoppedElapsedSeconds ?? elapsedSeconds)}</Text>
-                    </View>
-
-                    {activeWalk.participants.length > 0 && (
-                        <View style={styles.activeParticipantsWrap}>
-                            <Text style={styles.activeParticipantsLabel}>Participants</Text>
-                            <View style={styles.activeParticipantsList}>
-                                {activeWalk.participants.map((name, idx) => (
-                                    <View key={`${name}-${idx}`} style={styles.activeParticipantChip}>
-                                        <Text style={styles.activeParticipantText}>{name}</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        </View>
-                    )}
-
-                    <TouchableOpacity
-                        style={styles.endWalkButton}
-                        onPress={() => {
-                            setStoppedElapsedSeconds(elapsedSeconds);
-                            setEndWalkModalVisible(true);
-                        }}
-                        disabled={isEndingWalk}
-                    >
-                        <Text style={styles.endWalkButtonText}>End Walk</Text>
-                    </TouchableOpacity>
-                </View>
+                <ActiveWalkDrawer
+                    participants={activeWalk.participants}
+                    elapsedLabel={formatDuration(stoppedElapsedSeconds ?? elapsedSeconds)}
+                    isEndingWalk={isEndingWalk}
+                    onEndWalk={() => {
+                        setStoppedElapsedSeconds(elapsedSeconds);
+                        setEndWalkModalVisible(true);
+                    }}
+                    styles={styles}
+                />
             )}
 
             {/* Simple Branch Picker Modal */}
@@ -957,32 +982,37 @@ export default function MapScreen() {
                 animationType="fade"
                 onRequestClose={() => setShowBranchPicker(false)}
             >
-                <TouchableOpacity
-                    style={styles.modalOverlay}
-                    onPress={() => setShowBranchPicker(false)}
-                >
+                <View style={styles.modalOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowBranchPicker(false)}>
+                        <View style={StyleSheet.absoluteFillObject} />
+                    </TouchableWithoutFeedback>
                     <View style={styles.pickerModalContent}>
                         <Text style={styles.pickerTitle}>Select Branch</Text>
-                        <FlatList
-                            data={sortedBranches}
-                            keyExtractor={(item) => item}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={styles.pickerItem}
-                                    onPress={() => {
-                                        setStartBranch(item);
-                                        setShowBranchPicker(false);
-                                    }}
-                                >
-                                    <Text style={[
-                                        styles.pickerItemText,
-                                        item === startBranch && styles.selectedPickerItemText
-                                    ]}>{item}</Text>
-                                </TouchableOpacity>
-                            )}
-                        />
+                        {sortedBranches.length > 0 ? (
+                            <FlatList
+                                data={sortedBranches}
+                                keyExtractor={(item) => item}
+                                keyboardShouldPersistTaps="handled"
+                                renderItem={({ item }) => (
+                                    <TouchableOpacity
+                                        style={styles.pickerItem}
+                                        onPress={() => {
+                                            setStartBranch(item);
+                                            setShowBranchPicker(false);
+                                        }}
+                                    >
+                                        <Text style={[
+                                            styles.pickerItemText,
+                                            item === startBranch && styles.selectedPickerItemText
+                                        ]}>{item}</Text>
+                                    </TouchableOpacity>
+                                )}
+                            />
+                        ) : (
+                            <Text style={styles.pickerEmptyText}>No branches available yet.</Text>
+                        )}
                     </View>
-                </TouchableOpacity>
+                </View>
             </Modal>
 
             <Modal
@@ -1451,6 +1481,11 @@ const styles = StyleSheet.create({
         fontSize: 16,
         textAlign: 'center',
         color: '#333',
+    },
+    pickerEmptyText: {
+        textAlign: 'center',
+        color: '#6B7280',
+        paddingVertical: 12,
     },
     selectedPickerItemText: {
         color: '#4C6EF5',

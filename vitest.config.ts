@@ -11,6 +11,7 @@ export default defineConfig({
         hookTimeout: 30_000,
         // Load .env before tests
         env: { NODE_ENV: 'test' },
+        setupFiles: ['tests/setup/requireLocalDb.ts'],
         include: ['tests/**/*.test.ts'],
         reporters: ['verbose'],
     },

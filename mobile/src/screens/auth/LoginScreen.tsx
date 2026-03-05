@@ -12,8 +12,8 @@ export default function LoginScreen() {
     const handleLogin = async () => {
         try {
             await login(email, password);
-        } catch (e) {
-            Alert.alert('Login Failed', e.message || 'Check credentials');
+        } catch (e: any) {
+            Alert.alert('Login Failed', e?.message || 'Check credentials');
         }
     };
 

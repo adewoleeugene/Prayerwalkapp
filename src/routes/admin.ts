@@ -7,79 +7,23 @@ import { buildInviteEmailHtml, buildResetEmailHtml, sendEmail } from '../lib/mai
 import { writeAuditLog } from '../lib/audit';
 import { bumpTokenVersion } from '../lib/accountSecurity';
 import { hashPassword, isValidPassword, verifyPassword } from '../lib/auth';
+import { logger } from '../lib/logger';
+import { getAdminScope, isAdminBranchMatch, requireSuperadmin } from '../policies/adminScope';
+import { listBranchesRaw, findBranchesByAssignedBranch } from '../repositories/branchRepository';
+import { getAppBaseUrl, slugify } from '../validators/admin';
+import { DomainError } from '../errors/domainError';
+import {
+    deactivateAdmin,
+    listAdminUsers,
+    reactivateAdmin,
+    reassignAdminBranch,
+    removeAdmin,
+    resetAdminPassword,
+} from '../services/admin/adminUserService';
 
 const router = Router();
 
 router.use(authenticate);
-
-type AdminScope = {
-    role: string;
-    isSuperadmin: boolean;
-    branch: string | null;
-};
-
-function getAdminScope(req: Request, res: Response): AdminScope | null {
-    const role = req.user?.role || 'user';
-
-    if (role !== 'admin' && role !== 'superadmin') {
-        res.status(403).json({ error: 'Forbidden: Admin access required' });
-        return null;
-    }
-
-    if (role === 'superadmin') {
-        return {
-            role,
-            isSuperadmin: true,
-            branch: null,
-        };
-    }
-
-    const branch = req.user?.branch?.trim() || null;
-    if (!branch) {
-        res.status(403).json({ error: 'Forbidden: Branch admin requires assigned branch' });
-        return null;
-    }
-
-    return {
-        role,
-        isSuperadmin: false,
-        branch,
-    };
-}
-
-function requireSuperadmin(scope: AdminScope, res: Response): boolean {
-    if (!scope.isSuperadmin) {
-        res.status(403).json({ error: 'Forbidden: Superadmin access required' });
-        return false;
-    }
-    return true;
-}
-
-function isAdminBranchMatch(scope: AdminScope, branch: { name: string; slug: string }): boolean {
-    if (scope.isSuperadmin) {
-        return true;
-    }
-    const assigned = (scope.branch || '').trim().toLowerCase();
-    if (!assigned) {
-        return false;
-    }
-    return assigned === String(branch.slug || '').trim().toLowerCase()
-        || assigned === String(branch.name || '').trim().toLowerCase();
-}
-
-function slugify(value: string): string {
-    return value
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-}
-
-function getAppBaseUrl(req: Request): string {
-    const configured = (process.env.APP_BASE_URL || '').trim();
-    if (configured) return configured.replace(/\/+$/, '');
-    return `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
-}
 
 // GET /admin/me - Current admin profile
 router.get('/me', async (req: Request, res: Response) => {
@@ -119,7 +63,7 @@ router.get('/me', async (req: Request, res: Response) => {
             }
         });
     } catch (error) {
-        console.error('Admin me error:', error);
+        logger.error('Admin me error:', error);
         res.status(500).json({ error: 'Failed to load admin profile' });
     }
 });
@@ -144,7 +88,7 @@ router.patch('/me', async (req: Request, res: Response) => {
 
         res.json({ success: true, name: updated.name });
     } catch (error) {
-        console.error('Admin update profile error:', error);
+        logger.error('Admin update profile error:', error);
         res.status(500).json({ error: 'Failed to update profile' });
     }
 });
@@ -218,7 +162,7 @@ router.post('/change-password', async (req: Request, res: Response) => {
             message: 'Password updated. Please log in again.'
         });
     } catch (error) {
-        console.error('Admin change password error:', error);
+        logger.error('Admin change password error:', error);
         res.status(500).json({ error: 'Failed to update password' });
     }
 });
@@ -392,11 +336,7 @@ router.get('/branches', async (req: Request, res: Response) => {
         }
 
         if (scope.isSuperadmin) {
-            const rows = await executeRawQuery<any[]>(
-                `SELECT id, name, slug, center_lat, center_lng, service_radius_meters, country, region, is_active, sort_order, created_at, updated_at
-                 FROM branches
-                 ORDER BY sort_order ASC, name ASC`
-            );
+            const rows = await listBranchesRaw();
 
             res.json({
                 success: true,
@@ -420,13 +360,7 @@ router.get('/branches', async (req: Request, res: Response) => {
             return;
         }
 
-        const rows = await executeRawQuery<any[]>(
-            `SELECT id, name, slug, center_lat, center_lng, service_radius_meters, country, region, is_active, sort_order, created_at, updated_at
-             FROM branches
-             WHERE LOWER(slug) = LOWER($1) OR LOWER(name) = LOWER($1)
-             ORDER BY sort_order ASC, name ASC`,
-            [scope.branch]
-        );
+        const rows = await findBranchesByAssignedBranch(scope.branch!);
 
         res.json({
             success: true,
@@ -449,7 +383,7 @@ router.get('/branches', async (req: Request, res: Response) => {
             })),
         });
     } catch (e) {
-        console.error('Admin branches list error:', e);
+        logger.error('Admin branches list error:', e);
         res.status(500).json({ error: 'Failed to fetch branches' });
     }
 });
@@ -551,7 +485,7 @@ router.post('/branches', async (req: Request, res: Response) => {
             res.status(409).json({ error: 'Branch slug already exists' });
             return;
         }
-        console.error('Admin branch create error:', e);
+        logger.error('Admin branch create error:', e);
         res.status(500).json({ error: 'Failed to create branch' });
     }
 });
@@ -708,7 +642,7 @@ router.patch('/branches/:id', async (req: Request, res: Response) => {
             res.status(409).json({ error: 'Branch slug already exists' });
             return;
         }
-        console.error('Admin branch update error:', e);
+        logger.error('Admin branch update error:', e);
         res.status(500).json({ error: 'Failed to update branch' });
     }
 });
@@ -738,7 +672,7 @@ router.delete('/branches/:id', async (req: Request, res: Response) => {
 
         res.json({ success: true });
     } catch (e) {
-        console.error('Admin branch delete error:', e);
+        logger.error('Admin branch delete error:', e);
         res.status(500).json({ error: 'Failed to deactivate branch' });
     }
 });
@@ -754,52 +688,15 @@ router.get('/admin-users', async (req: Request, res: Response) => {
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
 
-        const users = await prisma.user.findMany({
-            where: { role: 'admin' as any },
-            orderBy: [{ branch: 'asc' }, { createdAt: 'desc' }],
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                branch: true,
-                isActive: true,
-                lastLogin: true,
-                createdAt: true,
-                updatedAt: true,
-            }
-        });
-
-        const inviteRows = await executeRawQuery<Array<{
-            id: string;
-            email: string;
-            status: string;
-            expires_at: string;
-            created_at: string;
-        }>>(
-            `SELECT DISTINCT ON (LOWER(email))
-                id, email, status, expires_at, created_at
-             FROM admin_invites
-             ORDER BY LOWER(email), created_at DESC`
-        );
-        const inviteByEmail = new Map(inviteRows.map((row) => [String(row.email).toLowerCase(), row] as const));
+        const admins = await listAdminUsers();
 
         res.json({
             success: true,
-            count: users.length,
-            admins: users.map((user) => {
-                const invite = inviteByEmail.get(String(user.email).toLowerCase());
-                return {
-                    ...user,
-                    inviteId: invite?.id || null,
-                    inviteStatus: invite?.status || null,
-                    inviteExpiresAt: invite?.expires_at || null,
-                    inviteCreatedAt: invite?.created_at || null,
-                };
-            })
+            count: admins.length,
+            admins
         });
     } catch (error) {
-        console.error('Admin users list error:', error);
+        logger.error('Admin users list error:', error);
         res.status(500).json({ error: 'Failed to list admin users' });
     }
 });
@@ -859,7 +756,7 @@ router.post('/admin-invites', async (req: Request, res: Response) => {
         } catch (mailError: any) {
             emailSent = false;
             emailError = String(mailError?.message || 'Email delivery failed');
-            console.error('Admin invite email send error:', mailError);
+            logger.error('Admin invite email send error:', mailError);
         }
 
         await writeAuditLog({
@@ -885,7 +782,7 @@ router.post('/admin-invites', async (req: Request, res: Response) => {
             warning: emailSent ? undefined : 'Invite created, but email delivery failed. Configure Resend/domain to send externally.'
         });
     } catch (error: any) {
-        console.error('Admin invite create error:', error);
+        logger.error('Admin invite create error:', error);
         const details = String(error?.message || '');
         res.status(500).json({ error: 'Failed to create invite', details: details || undefined });
     }
@@ -953,7 +850,7 @@ router.post('/admin-invites/:id/resend', async (req: Request, res: Response) => 
         } catch (mailError: any) {
             emailSent = false;
             emailError = String(mailError?.message || 'Email delivery failed');
-            console.error('Admin invite resend email error:', mailError);
+            logger.error('Admin invite resend email error:', mailError);
         }
 
         await writeAuditLog({
@@ -978,7 +875,7 @@ router.post('/admin-invites/:id/resend', async (req: Request, res: Response) => 
             warning: emailSent ? undefined : 'Invite recreated, but email delivery failed. Configure Resend/domain to send externally.'
         });
     } catch (error) {
-        console.error('Admin invite resend error:', error);
+        logger.error('Admin invite resend error:', error);
         res.status(500).json({ error: 'Failed to resend invite' });
     }
 });
@@ -992,27 +889,15 @@ router.post('/admin-users/:id/deactivate', async (req: Request, res: Response) =
         }
 
         const { id } = req.params;
-        const user = await prisma.user.findUnique({ where: { id } });
-        if (!user || user.role !== 'admin') {
-            res.status(404).json({ error: 'Admin user not found' });
-            return;
-        }
-
-        await prisma.user.update({
-            where: { id },
-            data: { isActive: false }
-        });
-        await bumpTokenVersion(id);
-        await writeAuditLog({
-            actorUserId: req.user!.userId,
-            action: 'admin_deactivated',
-            targetUserId: id,
-            metadata: { email: user.email, branch: user.branch }
-        });
+        await deactivateAdmin(id, req.user!.userId);
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Admin deactivate error:', error);
+        if (error instanceof DomainError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+        }
+        logger.error('Admin deactivate error:', error);
         res.status(500).json({ error: 'Failed to deactivate admin' });
     }
 });
@@ -1026,27 +911,15 @@ router.post('/admin-users/:id/reactivate', async (req: Request, res: Response) =
         }
 
         const { id } = req.params;
-        const user = await prisma.user.findUnique({ where: { id } });
-        if (!user || user.role !== 'admin') {
-            res.status(404).json({ error: 'Admin user not found' });
-            return;
-        }
-
-        await prisma.user.update({
-            where: { id },
-            data: { isActive: true }
-        });
-        await bumpTokenVersion(id);
-        await writeAuditLog({
-            actorUserId: req.user!.userId,
-            action: 'admin_reactivated',
-            targetUserId: id,
-            metadata: { email: user.email, branch: user.branch }
-        });
+        await reactivateAdmin(id, req.user!.userId);
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Admin reactivate error:', error);
+        if (error instanceof DomainError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+        }
+        logger.error('Admin reactivate error:', error);
         res.status(500).json({ error: 'Failed to reactivate admin' });
     }
 });
@@ -1061,46 +934,14 @@ router.post('/admin-users/:id/reassign-branch', async (req: Request, res: Respon
 
         const { id } = req.params;
         const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : '';
-        if (!branch) {
-            res.status(400).json({ error: 'branch is required' });
-            return;
-        }
-
-        const branchRows = await executeRawQuery<Array<{ name: string; slug: string }>>(
-            `SELECT name, slug
-             FROM branches
-             WHERE LOWER(slug) = LOWER($1) OR LOWER(name) = LOWER($1)
-             LIMIT 1`,
-            [branch]
-        );
-        const matchedBranch = branchRows[0];
-        if (!matchedBranch) {
-            res.status(400).json({ error: 'Branch not found' });
-            return;
-        }
-
-        const user = await prisma.user.findUnique({ where: { id } });
-        if (!user || user.role !== 'admin') {
-            res.status(404).json({ error: 'Admin user not found' });
-            return;
-        }
-
-        await prisma.user.update({
-            where: { id },
-            data: { branch: matchedBranch.slug }
-        });
-        await bumpTokenVersion(id);
-
-        await writeAuditLog({
-            actorUserId: req.user!.userId,
-            action: 'admin_branch_reassigned',
-            targetUserId: id,
-            metadata: { fromBranch: user.branch, toBranch: matchedBranch.slug, email: user.email }
-        });
-
-        res.json({ success: true, branch: matchedBranch.slug });
+        const nextBranch = await reassignAdminBranch(id, branch, req.user!.userId);
+        res.json({ success: true, branch: nextBranch });
     } catch (error) {
-        console.error('Admin reassign branch error:', error);
+        if (error instanceof DomainError) {
+            res.status(error.statusCode).json({ error: error.message, details: error.details });
+            return;
+        }
+        logger.error('Admin reassign branch error:', error);
         res.status(500).json({ error: 'Failed to reassign admin branch' });
     }
 });
@@ -1114,39 +955,15 @@ router.post('/admin-users/:id/reset-password', async (req: Request, res: Respons
         }
 
         const { id } = req.params;
-        const user = await prisma.user.findUnique({ where: { id } });
-        if (!user || user.role !== 'admin') {
-            res.status(404).json({ error: 'Admin user not found' });
-            return;
-        }
-
-        const rawToken = createOpaqueToken();
-        const tokenHash = hashToken(rawToken);
-        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-        await executeRawQuery(
-            `INSERT INTO password_resets (user_id, token_hash, expires_at, status, requested_by, created_by_user_id)
-             VALUES ($1::uuid, $2, $3::timestamptz, 'pending', 'superadmin', $4::uuid)`,
-            [user.id, tokenHash, expiresAt.toISOString(), req.user!.userId]
-        );
-        await bumpTokenVersion(user.id);
-
-        const link = `${getAppBaseUrl(req)}/admin-reset-password.html?token=${encodeURIComponent(rawToken)}`;
-        await sendEmail({
-            to: user.email,
-            subject: 'Admin password reset',
-            html: buildResetEmailHtml(link, expiresAt.toISOString())
-        });
-
-        await writeAuditLog({
-            actorUserId: req.user!.userId,
-            action: 'password_reset_requested',
-            targetUserId: user.id,
-            metadata: { requestedBy: 'superadmin', email: user.email }
-        });
+        await resetAdminPassword(id, req.user!.userId, getAppBaseUrl(req));
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Admin reset password error:', error);
+        if (error instanceof DomainError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+        }
+        logger.error('Admin reset password error:', error);
         res.status(500).json({ error: 'Failed to send reset password link' });
     }
 });
@@ -1160,26 +977,15 @@ router.delete('/admin-users/:id', async (req: Request, res: Response) => {
         }
 
         const { id } = req.params;
-        const user = await prisma.user.findUnique({ where: { id } });
-        if (!user || user.role !== 'admin') {
-            res.status(404).json({ error: 'Admin user not found' });
-            return;
-        }
-
-        // Invalidate any active session first
-        await bumpTokenVersion(id);
-
-        await prisma.user.delete({ where: { id } });
-
-        await writeAuditLog({
-            actorUserId: req.user!.userId,
-            action: 'admin_deleted',
-            metadata: { email: user.email, branch: user.branch }
-        });
+        await removeAdmin(id, req.user!.userId);
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Admin delete error:', error);
+        if (error instanceof DomainError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+        }
+        logger.error('Admin delete error:', error);
         res.status(500).json({ error: 'Failed to delete admin user' });
     }
 });

@@ -7,6 +7,13 @@ import { prisma, executeRawQuery } from '../../src/lib/db';
 import { hashPassword } from '../../src/lib/auth';
 import { generateToken } from '../../src/lib/auth';
 
+function assertTestDbConfigured() {
+    const configured = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
+    if (!configured) {
+        throw new Error('Test DB is not configured. Set TEST_DATABASE_URL to a local PostgreSQL test database.');
+    }
+}
+
 // Each test file runs in its own fork; add Math.random() to prevent timestamp collision
 export const TEST_TAG = `e2e_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 
@@ -18,6 +25,7 @@ export async function createTestUser(overrides: {
     branch?: string | null;
     role?: string;
 } = {}) {
+    assertTestDbConfigured();
     // Each caller must pass a unique email or we generate one with extra entropy
     const email = overrides.email ?? `u_${Date.now()}_${Math.random().toString(36).slice(2)}@${TEST_TAG}.test`;
     const password = overrides.password ?? 'Test1234!';
@@ -68,6 +76,7 @@ export async function createTestSuperadmin() {
  * Returns the slug.
  */
 export async function ensureTestBranch(name: string, slug: string) {
+    assertTestDbConfigured();
     await executeRawQuery(
         `INSERT INTO branches (name, slug, center_lat, center_lng, service_radius_meters, is_active)
          VALUES ($1, $2, 51.5074, -0.1278, 80000, true)
@@ -79,6 +88,7 @@ export async function ensureTestBranch(name: string, slug: string) {
 
 /** Create a walk session for a user and return the session. */
 export async function createTestWalkSession(userId: string, branch: string | null = null, status = 'active') {
+    assertTestDbConfigured();
     return prisma.prayerSession.create({
         data: {
             userId,
@@ -92,6 +102,7 @@ export async function createTestWalkSession(userId: string, branch: string | nul
 
 /** Wipe all rows created during this test run. */
 export async function cleanupTestData() {
+    assertTestDbConfigured();
     // Cascade deletes GPS events, flags, checkpoints, completions
     await prisma.prayerSession.deleteMany({
         where: { user: { email: { contains: TEST_TAG } } }

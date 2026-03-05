@@ -1,5 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
-import client from '@/api/client';
+import { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,22 +7,9 @@ import {
     ChevronDown, Building2, CheckCircle2, Clock, AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface AdminUser {
-    id: string;
-    email: string;
-    name: string | null;
-    role: string;
-    branch: string | null;
-    isActive: boolean;
-    lastLogin: string | null;
-    createdAt: string;
-    inviteStatus: string | null;
-    inviteExpiresAt: string | null;
-}
-
-interface Branch { id: string; name: string; slug: string; }
+import { useAdminUsersData } from '@/features/admin-users/hooks/useAdminUsersData';
+import { inviteAdmin, reassignBranch } from '@/features/admin-users/api/adminUsersApi';
+import type { AdminUser, Branch } from '@/features/admin-users/types';
 
 // ─── Confirm Dialog ───────────────────────────────────────────────────────────
 function ConfirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel }: {
@@ -62,7 +48,7 @@ function InviteModal({ branches, onClose, onSuccess }: {
         if (!email || !branch || !pastorName) return;
         setLoading(true);
         try {
-            const res = await client.post('/admin/admin-invites', { email, pastorName, branch });
+            const res = await inviteAdmin({ email, pastorName, branch });
             setResult({ inviteLink: res.data.inviteLink, warning: res.data.warning });
             onSuccess();
         } catch (e: any) {
@@ -181,7 +167,7 @@ function ReassignModal({ admin, branches, onClose, onSuccess }: {
         if (!branch) return;
         setLoading(true);
         try {
-            await client.post(`/admin/admin-users/${admin.id}/reassign-branch`, { branch });
+            await reassignBranch(admin.id, branch);
             onSuccess();
             onClose();
         } catch (e: any) {
@@ -231,9 +217,7 @@ function ReassignModal({ admin, branches, onClose, onSuccess }: {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminsPage() {
-    const [admins, setAdmins] = useState<AdminUser[]>([]);
-    const [branches, setBranches] = useState<Branch[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { admins, branches, loading, load, deactivateOrReactivate, resend, remove, sendReset } = useAdminUsersData();
     const [search, setSearch] = useState('');
     const [showInvite, setShowInvite] = useState(false);
     const [reassignTarget, setReassignTarget] = useState<AdminUser | null>(null);
@@ -246,22 +230,6 @@ export default function AdminsPage() {
         setTimeout(() => setToast(null), 3500);
     };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [adminRes, branchRes] = await Promise.all([
-                client.get('/admin/admin-users'),
-                client.get('/admin/branches'),
-            ]);
-            setAdmins(adminRes.data.admins || []);
-            setBranches(branchRes.data.branches || []);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
     useEffect(() => { load(); }, [load]);
 
     const handleAction = async (action: string, admin: AdminUser) => {
@@ -271,15 +239,15 @@ export default function AdminsPage() {
         setActionLoading(admin.id + action);
         try {
             if (action === 'reactivate') {
-                await client.post(`/admin/admin-users/${admin.id}/reactivate`);
+                await deactivateOrReactivate(admin);
                 showToast(`${admin.email} reactivated`);
             } else if (action === 'reset') {
-                await client.post(`/admin/admin-users/${admin.id}/reset-password`);
+                await sendReset(admin);
                 showToast('Password reset email sent');
             } else if (action === 'resend') {
+                await resend(admin);
                 showToast('Invite resent');
             }
-            await load();
         } catch (e: any) {
             showToast(e?.response?.data?.error || 'Action failed', false);
         } finally {
@@ -294,13 +262,12 @@ export default function AdminsPage() {
         setActionLoading(admin.id + action);
         try {
             if (action === 'deactivate') {
-                await client.post(`/admin/admin-users/${admin.id}/deactivate`);
+                await deactivateOrReactivate(admin);
                 showToast(`${admin.email} deactivated`);
             } else if (action === 'delete') {
-                await client.delete(`/admin/admin-users/${admin.id}`);
+                await remove(admin);
                 showToast(`${admin.email} deleted`);
             }
-            await load();
         } catch (e: any) {
             showToast(e?.response?.data?.error || 'Action failed', false);
         } finally {

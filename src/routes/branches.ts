@@ -26,16 +26,13 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 
     const latitude = typeof latRaw === 'string' ? Number(latRaw) : NaN;
     const longitude = typeof lngRaw === 'string' ? Number(lngRaw) : NaN;
-    const radiusMeters =
-      typeof radiusRaw === 'string' && radiusRaw.trim()
-        ? Number(radiusRaw)
-        : Number.POSITIVE_INFINITY;
+    const hasRadius = typeof radiusRaw === 'string' && radiusRaw.trim().length > 0;
+    const radiusMeters = hasRadius ? Number(radiusRaw) : null;
 
     if (
       (latRaw !== undefined && !Number.isFinite(latitude)) ||
       (lngRaw !== undefined && !Number.isFinite(longitude)) ||
-      !Number.isFinite(radiusMeters) ||
-      radiusMeters <= 0
+      (hasRadius && (!Number.isFinite(radiusMeters) || (radiusMeters as number) <= 0))
     ) {
       res.status(400).json({ error: 'Invalid lat/lng/radius query params' });
       return;
@@ -72,7 +69,10 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 
     const filtered =
       Number.isFinite(latitude) && Number.isFinite(longitude)
-        ? withDistance.filter((branch) => (branch.distanceMeters ?? Infinity) <= radiusMeters)
+        ? withDistance.filter((branch) => {
+            if (!hasRadius) return true;
+            return (branch.distanceMeters ?? Infinity) <= (radiusMeters as number);
+          })
         : withDistance;
 
     const sorted =

@@ -13,8 +13,8 @@ export default function SignupScreen() {
     const handleSignup = async () => {
         try {
             await signup(email, password, name);
-        } catch (e) {
-            Alert.alert('Signup Failed', e.message || 'Error occurred');
+        } catch (e: any) {
+            Alert.alert('Signup Failed', e?.message || 'Error occurred');
         }
     };
 

@@ -1,178 +1,23 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/db';
-import { executeRawQuery, createPoint, isWithinRange, parsePoint, calculateDistance } from '../lib/db';
-import { checkAndAwardBadges } from '../lib/badges';
+import { executeRawQuery } from '../lib/db';
 import { authenticate } from '../middleware/authMiddleware';
 import { validateGPSUpdate } from '../lib/gps';
+import { logger } from '../lib/logger';
+import { DomainError } from '../errors/domainError';
+import {
+  calculateDistanceMeters,
+  cleanRoutePoints,
+  normalizeSearchText,
+  parseCoordinateSearchTerm,
+  parseGeoPoint,
+  parseParticipants,
+  parsePointLabel,
+  toWalkLabel,
+} from '../services/walks/routeUtils';
+import { arriveAtLocation, completeWalk, startWalk } from '../services/walks/walkSessionService';
 
 const router = Router();
-
-function parseGeoPoint(pointLike: unknown): { latitude: number; longitude: number } | null {
-  if (!pointLike) return null;
-
-  try {
-    const parsed = typeof pointLike === 'string' ? JSON.parse(pointLike) : pointLike;
-    const coords = (parsed as any)?.coordinates;
-    if (Array.isArray(coords) && coords.length >= 2) {
-      const latitude = Number(coords[1]);
-      const longitude = Number(coords[0]);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        return { latitude, longitude };
-      }
-    }
-
-    const latitude = Number((parsed as any)?.latitude ?? (parsed as any)?.lat);
-    const longitude = Number((parsed as any)?.longitude ?? (parsed as any)?.lng);
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-      return { latitude, longitude };
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function parsePointLabel(pointLike: unknown): string | null {
-  if (!pointLike) return null;
-
-  try {
-    const parsed = typeof pointLike === 'string' ? JSON.parse(pointLike) : pointLike;
-    const raw =
-      (parsed as any)?.label ||
-      (parsed as any)?.startAddress ||
-      (parsed as any)?.address ||
-      (parsed as any)?.properties?.label ||
-      (parsed as any)?.properties?.startAddress ||
-      (parsed as any)?.properties?.address;
-    const label = typeof raw === 'string' ? raw.trim() : '';
-    return label || null;
-  } catch {
-    return null;
-  }
-}
-
-function parseParticipants(participantsLike: unknown): string[] {
-  if (!participantsLike) return [];
-
-  if (Array.isArray(participantsLike)) {
-    return participantsLike.map((name) => String(name).trim()).filter(Boolean);
-  }
-
-  if (typeof participantsLike === 'string') {
-    try {
-      const parsed = JSON.parse(participantsLike);
-      if (Array.isArray(parsed)) {
-        return parsed.map((name) => String(name).trim()).filter(Boolean);
-      }
-      const raw = participantsLike.trim();
-      return raw ? [raw] : [];
-    } catch {
-      const raw = participantsLike.trim();
-      return raw ? [raw] : [];
-    }
-  }
-
-  return [];
-}
-
-function normalizeSearchText(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase();
-}
-
-function parseCoordinateSearchTerm(term: string): { latitude: number; longitude: number } | null {
-  const raw = String(term || '').trim();
-  if (!raw) return null;
-
-  const normalized = raw.replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
-  let latStr = '';
-  let lngStr = '';
-
-  if (normalized.includes(',')) {
-    const parts = normalized.split(',').map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      latStr = parts[0];
-      lngStr = parts[1];
-    }
-  } else {
-    const parts = normalized.split(' ').map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      latStr = parts[0];
-      lngStr = parts[1];
-    }
-  }
-
-  const latitude = Number(latStr);
-  const longitude = Number(lngStr);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
-  return { latitude, longitude };
-}
-
-function calculateDistanceMeters(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
-): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const R = 6371e3;
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLng = toRad(b.longitude - a.longitude);
-  const lat1 = toRad(a.latitude);
-  const lat2 = toRad(b.latitude);
-  const x =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  return R * c;
-}
-
-function cleanRoutePoints(points: Array<{ latitude: number; longitude: number }>) {
-  if (points.length < 2) return points;
-
-  const cleaned: Array<{ latitude: number; longitude: number }> = [points[0]];
-  const MAX_POINT_JUMP_METERS = 350;
-
-  for (let i = 1; i < points.length; i++) {
-    const prev = cleaned[cleaned.length - 1];
-    const next = points[i];
-    const jump = calculateDistanceMeters(prev, next);
-    if (jump <= MAX_POINT_JUMP_METERS) {
-      cleaned.push(next);
-    }
-  }
-
-  return cleaned;
-}
-
-function toWalkLabel(startLocationName: string | null, endLocationName: string | null, fallback: string): string {
-  if (startLocationName && endLocationName) {
-    if (startLocationName === endLocationName) return startLocationName;
-    return `${startLocationName} -> ${endLocationName}`;
-  }
-  if (endLocationName) return endLocationName;
-  if (startLocationName) return startLocationName;
-  return fallback;
-}
-
-// Helper to generate checkpoints between start and target
-function generateCheckpoints(startLat: number, startLng: number, targetLat: number, targetLng: number) {
-  const distance = calculateDistance(startLat, startLng, targetLat, targetLng);
-  const numPoints = Math.floor(distance / 100); // Checkpoint every 100m
-
-  const checkpoints = [];
-  if (numPoints <= 1) return []; // Too close for checkpoints
-
-  for (let i = 1; i < numPoints; i++) {
-    const ratio = i / numPoints;
-    const lat = startLat + (targetLat - startLat) * ratio;
-    const lng = startLng + (targetLng - startLng) * ratio;
-    checkpoints.push({
-      location: JSON.stringify({ type: 'Point', coordinates: [lng, lat] }),
-      order: i
-    });
-  }
-  return checkpoints;
-}
 
 // GET /walks/history - show completed walk paths on map
 router.get('/history', authenticate, async (req: Request, res: Response) => {
@@ -547,7 +392,7 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       routes: walksWithOpacity
     });
   } catch (error) {
-    console.error('Walk history error:', error);
+    logger.error('Walk history error:', error);
     res.status(500).json({ error: 'Failed to fetch walk history' });
   }
 });
@@ -556,83 +401,39 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 router.post('/start', authenticate, async (req: Request, res: Response) => {
   try {
     const { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress } = req.body;
-    const userId = req.user!.userId;
-
-    if (!latitude || !longitude) {
-      res.status(400).json({ error: 'Start location (lat, lng) required' });
-      return;
-    }
-
-    const activeSession = await prisma.prayerSession.findFirst({
-      where: { userId, status: 'active' }
+    const result = await startWalk({
+      userId: req.user!.userId,
+      locationId,
+      latitude,
+      longitude,
+      deviceFingerprint,
+      branch,
+      participants,
+      startAddress,
     });
 
-    if (activeSession) {
+    if (result.resumed) {
       res.status(200).json({
         success: true,
         message: 'Resuming existing active session',
-        session: activeSession,
-        location: null
+        session: result.session,
+        location: null,
       });
       return;
-    }
-
-    let targetLocation = null;
-    if (locationId) {
-      targetLocation = await prisma.prayerLocation.findUnique({
-        where: { id: locationId }
-      });
-      if (!targetLocation) return res.status(404).json({ error: 'Location not found' });
-    }
-
-    const point = createPoint(latitude, longitude);
-    const parsedPoint = JSON.parse(point);
-    const normalizedStartAddress =
-      typeof startAddress === 'string' && startAddress.trim()
-        ? startAddress.trim()
-        : null;
-    const startPointPayload = normalizedStartAddress
-      ? { ...parsedPoint, label: normalizedStartAddress }
-      : parsedPoint;
-
-    // Create session
-    const session = await prisma.prayerSession.create({
-      data: {
-        userId,
-        locationId: locationId || null,
-        startLocation: JSON.stringify(startPointPayload),
-        currentLocation: JSON.stringify(parsedPoint),
-        status: 'active',
-        deviceFingerprint,
-        branch,
-        participants: Array.isArray(participants) ? JSON.stringify(participants) : participants,
-        trustScore: 100
-      }
-    });
-
-    // Generate Checkpoints if target exists
-    if (targetLocation && targetLocation.location) {
-      const targetPoint = JSON.parse(targetLocation.location as string);
-      const checkpoints = generateCheckpoints(
-        latitude, longitude,
-        targetPoint.coordinates[1], targetPoint.coordinates[0]
-      );
-
-      if (checkpoints.length > 0) {
-        await prisma.routeCheckpoint.createMany({
-          data: checkpoints.map(cp => ({ ...cp, sessionId: session.id }))
-        });
-      }
     }
 
     res.status(201).json({
       success: true,
       message: 'Walk started with Route Integrity enabled',
-      session,
-      location: targetLocation
+      session: result.session,
+      location: result.location,
     });
   } catch (error) {
-    console.error('Start walk error:', error);
+    if (error instanceof DomainError) {
+      res.status(error.statusCode).json({ error: error.message, details: error.details });
+      return;
+    }
+    logger.error('Start walk error:', error);
     res.status(500).json({ error: 'Failed to start walk' });
   }
 });
@@ -657,12 +458,12 @@ router.post('/track', authenticate, async (req: Request, res: Response) => {
       });
       res.json({ success: true, status: 'validated' });
     } catch (err) {
-      console.error("Failed to validate GPS for session", sessionId, err);
+      logger.error('Failed to validate GPS for session', err, { sessionId });
       // Still return 200 so the app doesn't crash on failed validation logs
       res.json({ success: false, error: 'Validation failed' });
     }
   } catch (error) {
-    console.error('Track error:', error);
+    logger.error('Track error:', error);
     res.status(500).json({ error: 'Failed to record tracking point' });
   }
 });
@@ -671,66 +472,26 @@ router.post('/track', authenticate, async (req: Request, res: Response) => {
 router.post('/arrive', authenticate, async (req: Request, res: Response) => {
   try {
     const { sessionId, locationId, latitude, longitude } = req.body;
-    const userId = req.user!.userId;
-
-    const session = await prisma.prayerSession.findUnique({
-      where: { id: sessionId },
-      include: { checkpoints: true }
-    });
-
-    if (!session || session.userId !== userId || session.status !== 'active') {
-      return res.status(400).json({ error: 'Invalid or inactive session' });
-    }
-
-    let rangeCheck = { withinRange: true, distance: 0 };
-    let prayerLocation = null;
-
-    if (locationId) {
-      rangeCheck = await isWithinRange(latitude, longitude, locationId);
-      prayerLocation = await prisma.prayerLocation.findUnique({
-        where: { id: locationId },
-        include: { prayers: true }
-      });
-    }
-
-    // Route Integrity Check
-    const unreached = session.checkpoints.filter(cp => !cp.isReached);
-    const integrityScore = session.checkpoints.length > 0
-      ? Math.round(((session.checkpoints.length - unreached.length) / session.checkpoints.length) * 100)
-      : 100;
-
-    if (locationId && integrityScore < 70 && rangeCheck.withinRange) {
-      // Flag for skipping route but arriving anyway (teleport suspect)
-      await prisma.gPSFlag.create({
-        data: {
-          sessionId,
-          userId,
-          flagType: 'route_skipped',
-          severity: 'medium',
-          description: `Reached target but only ${integrityScore}% of checkpoints reached.`
-        }
-      });
-    }
-
-    // Update current location
-    const point = createPoint(latitude, longitude);
-
-    await prisma.prayerSession.update({
-      where: { id: sessionId },
-      data: {
-        currentLocation: JSON.stringify(JSON.parse(point)),
-        locationId: locationId || undefined
-      }
+    const result = await arriveAtLocation({
+      sessionId,
+      locationId,
+      latitude,
+      longitude,
+      userId: req.user!.userId,
     });
 
     res.json({
       success: true,
-      withinRange: rangeCheck.withinRange,
-      integrityScore,
-      location: prayerLocation,
-      distance: rangeCheck.distance,
+      withinRange: result.withinRange,
+      integrityScore: result.integrityScore,
+      location: result.location,
+      distance: result.distance,
     });
   } catch (error) {
+    if (error instanceof DomainError) {
+      res.status(error.statusCode).json({ error: error.message, details: error.details });
+      return;
+    }
     res.status(500).json({ error: 'Failed' });
   }
 });
@@ -739,111 +500,33 @@ router.post('/arrive', authenticate, async (req: Request, res: Response) => {
 router.post('/complete', authenticate, async (req: Request, res: Response) => {
   try {
     const { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal } = req.body;
-    const userId = req.user!.userId;
-
-    const session = await prisma.prayerSession.findUnique({
-      where: { id: sessionId },
-      include: { checkpoints: true, flags: true }
+    const result = await completeWalk({
+      sessionId,
+      locationId,
+      latitude,
+      longitude,
+      prayerSummary,
+      prayerJournal,
+      userId: req.user!.userId,
     });
-
-    if (!session || session.status !== 'active') {
-      return res.status(400).json({ error: 'Inactive session' });
-    }
-
-    // Final Trust Score Calculation
-    let finalScore = session.trustScore;
-    const unreached = session.checkpoints.filter(cp => !cp.isReached);
-    if (session.checkpoints.length > 0) {
-      const checkpointPenalty = (unreached.length / session.checkpoints.length) * 50;
-      finalScore -= Math.round(checkpointPenalty);
-    }
-
-    if (session.flags.length > 0) {
-      finalScore -= (session.flags.length * 20);
-    }
-
-    finalScore = Math.max(0, finalScore);
-
-    if (finalScore < 50) {
-      return res.status(403).json({
-        error: 'Session integrity too low for reward.',
-        trustScore: finalScore,
-        reason: 'Suspicious GPS activity or route skipping detected.'
-      });
-    }
-
-    let pointsEarned = 50; // Default for Open Walk
-    let locationName = 'Open Prayer Walk';
-    const completionLocationId = locationId || session.locationId || null;
-
-    if (completionLocationId) {
-      const location = await prisma.prayerLocation.findUnique({ where: { id: completionLocationId } });
-      if (!location) return res.status(404).json({ error: 'Location invalid' });
-
-      pointsEarned = location.points;
-      locationName = location.name;
-    }
-
-    const completionPoint = JSON.parse(createPoint(latitude, longitude));
-
-    if (completionLocationId) {
-      // Record Completion only when we have a concrete location
-      await prisma.completion.upsert({
-        where: {
-          userId_locationId: {
-            userId,
-            locationId: completionLocationId
-          }
-        },
-        update: {
-          sessionId,
-          pointsEarned,
-          trustScore: finalScore,
-          completionLocation: JSON.stringify(completionPoint),
-          completedAt: new Date()
-        },
-        create: {
-          userId,
-          locationId: completionLocationId,
-          sessionId,
-          pointsEarned,
-          trustScore: finalScore,
-          completionLocation: JSON.stringify(completionPoint)
-        }
-      });
-    }
-
-    const completionUpdateData: any = {
-      status: 'completed',
-      endTime: new Date(),
-      trustScore: finalScore,
-      prayerSummary:
-        typeof prayerSummary === 'string' && prayerSummary.trim()
-          ? prayerSummary.trim().slice(0, 600)
-          : null,
-      prayerJournal:
-        typeof prayerJournal === 'string' && prayerJournal.trim()
-          ? prayerJournal.trim().slice(0, 2000)
-          : null,
-      // Persist exact end destination coordinates on the session itself.
-      currentLocation: JSON.stringify(completionPoint)
-    };
-
-    await prisma.prayerSession.update({
-      where: { id: sessionId },
-      data: completionUpdateData
-    });
-
-    const badges = await checkAndAwardBadges(userId);
 
     res.json({
       success: true,
-      trustScore: finalScore,
-      pointsEarned: pointsEarned,
-      badgesEarned: badges
+      trustScore: result.trustScore,
+      pointsEarned: result.pointsEarned,
+      badgesEarned: result.badgesEarned
     });
 
   } catch (e) {
+    if (e instanceof DomainError) {
+      const details = (e.details ?? {}) as Record<string, unknown>;
+      res.status(e.statusCode).json({
+        error: e.message,
+        ...(details.trustScore !== undefined ? { trustScore: details.trustScore } : {}),
+        ...(details.reason !== undefined ? { reason: details.reason } : {}),
+      });
+      return;
+    }
     res.status(500).json({ error: 'Internal Error' });
   }
 });

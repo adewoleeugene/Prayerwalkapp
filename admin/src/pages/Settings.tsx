@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import client from '@/api/client';
+import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,6 +7,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { changePassword } from '@/features/settings/api/settingsApi';
+import { useAdminProfile } from '@/features/settings/hooks/useAdminProfile';
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ msg, ok }: { msg: string; ok: boolean }) {
@@ -80,8 +81,7 @@ function PasswordInput({ placeholder, value, onChange }: {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
     const navigate = useNavigate();
-    const [profile, setProfile] = useState<any>(null);
-    const [profileLoading, setProfileLoading] = useState(true);
+    const { profile, profileLoading, saveName } = useAdminProfile();
 
     // Password change state
     const [currentPw, setCurrentPw] = useState('');
@@ -101,13 +101,6 @@ export default function SettingsPage() {
         setTimeout(() => setToast(null), 3500);
     };
 
-    useEffect(() => {
-        client.get('/admin/me')
-            .then(r => setProfile(r.data.profile))
-            .catch(() => { })
-            .finally(() => setProfileLoading(false));
-    }, []);
-
     const handleChangePassword = async () => {
         setPwError('');
         if (!currentPw || !newPw || !confirmPw) { setPwError('All fields are required'); return; }
@@ -115,7 +108,7 @@ export default function SettingsPage() {
         if (newPw.length < 8) { setPwError('Password must be at least 8 characters'); return; }
         setPwLoading(true);
         try {
-            await client.post('/admin/change-password', { currentPassword: currentPw, newPassword: newPw });
+            await changePassword(currentPw, newPw);
             showToast('Password updated — please log in again');
             setCurrentPw(''); setNewPw(''); setConfirmPw('');
             setTimeout(() => {
@@ -142,8 +135,7 @@ export default function SettingsPage() {
         if (!trimmed) return;
         setNameLoading(true);
         try {
-            await client.patch('/admin/me', { name: trimmed });
-            setProfile((p: any) => ({ ...p, name: trimmed }));
+            await saveName(trimmed);
             setEditingName(false);
             showToast('Name updated successfully');
         } catch (e: any) {
