@@ -1,7 +1,16 @@
 import axios from 'axios';
 
+const configuredApiUrl = (import.meta.env.VITE_API_URL || '').trim();
+const isBrowser = typeof window !== 'undefined';
+const shouldIgnoreLocalhostUrl =
+    isBrowser &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(configuredApiUrl) &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1';
+
 const client = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || '',
+    // In production, fallback to same-origin to avoid broken localhost bundles.
+    baseURL: shouldIgnoreLocalhostUrl ? '' : configuredApiUrl,
 });
 
 client.interceptors.request.use((config) => {
