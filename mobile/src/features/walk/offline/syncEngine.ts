@@ -129,7 +129,11 @@ async function detectDeviceOnline(): Promise<boolean> {
   }
 }
 
-async function flushQueueInternal() {
+function shouldRespectRetryAt(reason: string): boolean {
+  return reason === 'interval';
+}
+
+async function flushQueueInternal(reason: string) {
   emitStatus({ isOnline: true });
 
   const initialQueue = await loadQueue();
@@ -144,11 +148,12 @@ async function flushQueueInternal() {
   const sessionMap = await loadSessionMap();
   let mutated = false;
   let latestError: string | null = null;
+  const respectRetryAt = shouldRespectRetryAt(reason);
 
   for (let i = 0; i < workingQueue.length; i += 1) {
     const item = workingQueue[i];
     if (item.status === 'failed') continue;
-    if (item.retryAt && new Date(item.retryAt).getTime() > now) continue;
+    if (respectRetryAt && item.retryAt && new Date(item.retryAt).getTime() > now) continue;
 
     try {
       const outcome = await sendQueuedItem(item, sessionMap);
@@ -237,13 +242,13 @@ async function flushQueueInternal() {
   await refreshCounts();
 }
 
-export async function triggerOfflineSync(_reason = 'manual') {
+export async function triggerOfflineSync(reason = 'manual') {
   if (inFlight) {
     await inFlight;
     return;
   }
   emitStatus({ isSyncing: true });
-  inFlight = flushQueueInternal().finally(() => {
+  inFlight = flushQueueInternal(reason).finally(() => {
     inFlight = null;
     emitStatus({ isSyncing: false });
   });
