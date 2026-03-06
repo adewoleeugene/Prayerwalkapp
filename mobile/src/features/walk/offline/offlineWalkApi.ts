@@ -19,6 +19,8 @@ function isOfflineLikeError(error: unknown): boolean {
   const axiosError = error as AxiosError;
   if (!axiosError) return false;
   if (!axiosError.response) return true;
+  const status = Number(axiosError.response.status || 0);
+  if (status >= 500) return true;
   return false;
 }
 

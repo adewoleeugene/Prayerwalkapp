@@ -674,7 +674,11 @@ export default function MapScreen() {
             }
         } catch (e: any) {
             console.error('Start Walk Error:', e);
-            const errorMessage = e.response?.data?.error || 'Failed to start walk';
+            const responseData = e?.response?.data;
+            const responseError = typeof responseData === 'string'
+                ? responseData
+                : responseData?.error;
+            const errorMessage = responseError || e?.message || 'Failed to start walk';
             Alert.alert('Error', errorMessage);
         }
     };

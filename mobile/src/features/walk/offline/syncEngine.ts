@@ -1,4 +1,5 @@
 import { AppState, AppStateStatus } from 'react-native';
+import * as Network from 'expo-network';
 import client from '../../../api/client';
 import {
   getQueueStats,
@@ -118,6 +119,16 @@ function toErrorMessage(error: any): string {
   return String(error?.message || 'Network error');
 }
 
+async function detectDeviceOnline(): Promise<boolean> {
+  try {
+    const state = await Network.getNetworkStateAsync();
+    // If connectivity cannot be determined, bias toward online and surface a sync error instead.
+    return state.isConnected !== false;
+  } catch {
+    return true;
+  }
+}
+
 async function flushQueueInternal() {
   emitStatus({ isOnline: true });
 
@@ -132,6 +143,7 @@ async function flushQueueInternal() {
   const workingQueue = [...initialQueue].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const sessionMap = await loadSessionMap();
   let mutated = false;
+  let latestError: string | null = null;
 
   for (let i = 0; i < workingQueue.length; i += 1) {
     const item = workingQueue[i];
@@ -140,7 +152,32 @@ async function flushQueueInternal() {
 
     try {
       const outcome = await sendQueuedItem(item, sessionMap);
-      if (outcome.skipped) continue;
+      if (outcome.skipped) {
+        const waitingForSessionMapping =
+          item.type !== 'start' &&
+          item.localSessionId.startsWith('local_') &&
+          !normalizeSessionId(item, sessionMap);
+
+        if (waitingForSessionMapping) {
+          const hasResolvableStart = workingQueue.some((queued) =>
+            queued.type === 'start' &&
+            queued.localSessionId === item.localSessionId &&
+            queued.status !== 'failed'
+          );
+
+          if (!hasResolvableStart) {
+            workingQueue[i] = {
+              ...item,
+              status: 'failed' as const,
+              attempts: item.attempts + 1,
+              lastError: 'Missing session mapping for queued action',
+            };
+            mutated = true;
+          }
+        }
+
+        continue;
+      }
       if (item.type === 'start' && outcome.serverSessionId) {
         sessionMap[item.localSessionId] = outcome.serverSessionId;
         for (let j = 0; j < workingQueue.length; j += 1) {
@@ -173,16 +210,18 @@ async function flushQueueInternal() {
       }
 
       const delay = retryDelayMs(item.attempts);
-      emitStatus({ isOnline: false });
+      const deviceOnline = await detectDeviceOnline();
+      latestError = toErrorMessage(error);
+      emitStatus({ isOnline: deviceOnline });
       workingQueue[i] = {
         ...item,
         status: 'pending' as const,
         attempts: item.attempts + 1,
         retryAt: new Date(Date.now() + delay).toISOString(),
-        lastError: toErrorMessage(error),
+        lastError: latestError,
       };
       mutated = true;
-      emitStatus({ error: toErrorMessage(error) });
+      emitStatus({ error: latestError });
       break;
     }
   }
@@ -193,7 +232,7 @@ async function flushQueueInternal() {
 
   emitStatus({
     lastSyncAt: mutated ? new Date().toISOString() : currentStatus.lastSyncAt,
-    error: null,
+    error: latestError,
   });
   await refreshCounts();
 }
