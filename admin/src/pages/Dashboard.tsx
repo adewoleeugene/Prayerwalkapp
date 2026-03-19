@@ -46,8 +46,8 @@ const START_ICON_ACTIVE = makeIcon('#16a34a', 'S');
 const END_ICON = makeIcon('#7c3aed', 'E');
 const END_ICON_ACTIVE = makeIcon('#dc2626', 'E');
 
-const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
 
 function toLatLng(point: any): { lat: number; lng: number } | null {
     if (!point) return null;

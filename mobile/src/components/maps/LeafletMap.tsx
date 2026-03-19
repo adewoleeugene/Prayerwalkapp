@@ -166,9 +166,10 @@ const initialHtml = `<!DOCTYPE html>
         }
 
         map = L.map('map', { zoomControl: true }).setView([8.4657, -13.2317], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors',
-          maxZoom: 19
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20
         }).addTo(map);
 
         markersLayer = L.layerGroup().addTo(map);
