@@ -657,9 +657,7 @@ export default function MapScreen() {
                 await saveActiveWalkState(nextActiveWalk);
                 fetchWalkHistory();
                 // Stay on MapScreen — walk tracking happens here
-                if (res.data.queued) {
-                    Alert.alert('Offline Start', 'Walk started offline. Data will sync automatically when internet returns.');
-                }
+                // Offline queuing is handled silently by the sync engine
             } else {
                 Alert.alert('Error', res.data.error || 'Could not start walk');
             }
@@ -762,12 +760,7 @@ export default function MapScreen() {
             setStoppedElapsedSeconds(null);
             await clearActiveWalkState();
             fetchWalkHistory();
-            Alert.alert(
-                'Walk Ended',
-                res.data?.queued
-                    ? 'Walk completed offline. It will sync automatically when internet returns.'
-                    : 'Your walk has been completed.'
-            );
+            Alert.alert('Walk Ended', 'Your walk has been completed.');
         } catch (e: any) {
             const errorMessage = e.response?.data?.error || e.message || 'Failed to complete walk';
             Alert.alert('Error', errorMessage);
