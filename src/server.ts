@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth';
 import locationRoutes from './routes/locations';
 import walkRoutes from './routes/walks';
@@ -18,8 +19,22 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// Allowed origins for CORS
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: ALLOWED_ORIGINS.length > 0
+    ? (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl)
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      }
+    : true, // Allow all origins if CORS_ORIGINS is not configured (dev mode)
+  credentials: true,
+}));
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -30,8 +45,6 @@ app.use(
           "'unsafe-inline'",
           "https://unpkg.com",
           "https://cdn.tailwindcss.com",
-          "https://maps.googleapis.com",
-          "https://maps.gstatic.com",
         ],
         styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://fonts.googleapis.com"],
         imgSrc: ["'self'", "data:", "https:"],
@@ -46,8 +59,25 @@ app.use(
   })
 );
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
+
+// Rate limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please try again later.' },
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 signups per IP per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many signup attempts. Please try again later.' },
+});
 
 // Root route
 app.get('/', (req, res) => {
@@ -59,8 +89,6 @@ app.get('/', (req, res) => {
       locations: '/locations',
       walks: '/walks',
       users: '/users',
-      documentation: 'See PHASE2_SUMMARY.md',
-      deployment_at: '2026-02-26T18:31:00Z'
     }
   });
 });
@@ -86,6 +114,13 @@ app.get('/v2/*', (req, res) => {
 app.get('/superadmin', (req, res) => {
   res.redirect('/admin');
 });
+
+// Apply rate limiting to auth routes
+app.use('/auth/login', authLimiter);
+app.use('/auth/signup', signupLimiter);
+app.use('/auth/register', signupLimiter);
+app.use('/auth/forgot-password', authLimiter);
+app.use('/auth/reset-password', authLimiter);
 
 app.use('/auth', authRoutes);
 app.use('/branches', branchRoutes);

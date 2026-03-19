@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { startOfflineSyncEngine, stopOfflineSyncEngine } from './src/features/walk/offline/syncEngine';
 
@@ -15,10 +14,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="auto" />
-        <AppNavigator />
-      </AuthProvider>
+      <StatusBar style="auto" />
+      <AppNavigator />
     </SafeAreaProvider>
   );
 }

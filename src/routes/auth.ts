@@ -67,8 +67,10 @@ router.get('/url-login', async (req: Request, res: Response) => {
     });
 
     if (redirect) {
-      const separator = redirect.includes('?') ? '&' : '?';
-      res.redirect(`${redirect}${separator}token=${encodeURIComponent(token)}`);
+      // Only allow relative redirects to prevent open redirect attacks
+      const safeRedirect = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/';
+      const separator = safeRedirect.includes('?') ? '&' : '?';
+      res.redirect(`${safeRedirect}${separator}token=${encodeURIComponent(token)}`);
       return;
     }
 

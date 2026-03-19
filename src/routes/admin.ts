@@ -977,6 +977,25 @@ router.delete('/admin-users/:id', async (req: Request, res: Response) => {
         }
 
         const { id } = req.params;
+
+        // Prevent deleting yourself
+        if (id === req.user!.userId) {
+            res.status(403).json({ error: 'Cannot delete your own account' });
+            return;
+        }
+
+        // Prevent deleting the last superadmin
+        const targetUser = await prisma.user.findUnique({ where: { id }, select: { role: true } });
+        if (targetUser?.role === 'superadmin') {
+            const superadminCount = await prisma.user.count({
+                where: { role: 'superadmin', isActive: true },
+            });
+            if (superadminCount <= 1) {
+                res.status(403).json({ error: 'Cannot delete the last superadmin' });
+                return;
+            }
+        }
+
         await removeAdmin(id, req.user!.userId);
 
         res.json({ success: true });

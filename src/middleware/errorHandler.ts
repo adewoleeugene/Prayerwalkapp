@@ -12,7 +12,6 @@ export function errorHandler(
     res.status(err.statusCode).json({
       error: err.message,
       code: err.code,
-      details: err.details,
     });
     return;
   }
@@ -21,6 +20,5 @@ export function errorHandler(
     method: req.method,
     path: req.path,
   });
-  const message = err instanceof Error ? err.message : 'internal_server_error';
-  res.status(500).json({ error: message });
+  res.status(500).json({ error: 'Internal server error' });
 }

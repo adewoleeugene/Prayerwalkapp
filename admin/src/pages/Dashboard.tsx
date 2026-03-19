@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import {
     MapPin, Navigation, Search, RefreshCcw, Timer,
@@ -7,11 +7,47 @@ import {
     Building2, Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { GoogleMap, MarkerF, PolylineF, CircleF, useJsApiLoader } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Polyline, Circle, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-const mapContainerStyle = { height: '100%', width: '100%' };
+// Fix default marker icons (Leaflet + bundlers strip the default icon paths)
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: markerIcon2x,
+    iconUrl: markerIcon,
+    shadowUrl: markerShadow,
+});
+
+function makeIcon(color: string, label?: string): L.DivIcon {
+    return L.divIcon({
+        className: '',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        html: `<div style="
+            width:28px;height:28px;border-radius:50%;
+            background:${color};border:3px solid #fff;
+            box-shadow:0 2px 6px rgba(0,0,0,0.35);
+            display:flex;align-items:center;justify-content:center;
+            color:#fff;font-size:11px;font-weight:900;
+        ">${label || ''}</div>`,
+    });
+}
+
+const BRANCH_ICON = makeIcon('#1e293b', '');
+const BRANCH_ICON_HOVER = makeIcon('#2563EB', '');
+const START_ICON = makeIcon('#3b82f6', 'S');
+const START_ICON_ACTIVE = makeIcon('#16a34a', 'S');
+const END_ICON = makeIcon('#7c3aed', 'E');
+const END_ICON_ACTIVE = makeIcon('#dc2626', 'E');
+
+const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 function toLatLng(point: any): { lat: number; lng: number } | null {
     if (!point) return null;
@@ -33,8 +69,8 @@ function getWalkTrackPoints(walk: any): Array<{ lat: number; lng: number }> {
     const parsedPoints = rawPoints
         .map((p: any) => toLatLng(p))
         .filter((p: { lat: number; lng: number } | null): p is { lat: number; lng: number } => !!p);
-    if (walk?.routeQuality !== 'high') return [];
-    return parsedPoints.length >= 2 && hasMovement(parsedPoints) ? parsedPoints : [];
+    // Require 3+ points for a real path — 2 points would just draw a straight line
+    return parsedPoints.length >= 3 && hasMovement(parsedPoints) ? parsedPoints : [];
 }
 
 function getWalkIdentity(walk: any): string {
@@ -55,6 +91,26 @@ function getWalkIdentity(walk: any): string {
     const startLng = walk.startLocation?.longitude != null ? String(walk.startLocation.longitude) : '';
 
     return `fallback:${startedAt}:${endedAt}:${walker}:${startName}:${endName}:${startLat}:${startLng}`;
+}
+
+// ─── Map fit helpers ─────────────────────────────────────────────────────────
+
+function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
+    const map = useMap();
+    useEffect(() => {
+        if (bounds) {
+            map.fitBounds(bounds, { padding: [40, 40] });
+        }
+    }, [map, bounds]);
+    return null;
+}
+
+function FitToCenter({ center, zoom }: { center: [number, number]; zoom: number }) {
+    const map = useMap();
+    useEffect(() => {
+        map.setView(center, zoom);
+    }, [map, center, zoom]);
+    return null;
 }
 
 // ─── Walk Detail Expansion ────────────────────────────────────────────────────
@@ -144,11 +200,7 @@ function WalkDetail({ w }: { w: any }) {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
-    const { isLoaded: isGoogleLoaded, loadError: googleLoadError } = useJsApiLoader({
-        googleMapsApiKey: GOOGLE_MAPS_API_KEY || '',
-    });
-    const branchMapRef = useRef<any>(null);
-    const walkMapRef = useRef<any>(null);
+    const branchMapRef = useRef<L.Map | null>(null);
     const hasFittedBranchMap = useRef(false);
     const [view, setView] = useState<'branches' | 'walks'>('branches');
 
@@ -173,71 +225,61 @@ export default function DashboardPage() {
     const [walkSearch, setWalkSearch] = useState('');
     const [days, setDays] = useState(30);
 
-    useEffect(() => {
-        if (view !== 'branches' || !isGoogleLoaded || !branchMapRef.current || hasFittedBranchMap.current) return;
-        const gm = (window as any).google?.maps;
-        if (!gm) return;
-
+    // Compute branch map bounds
+    const branchBounds = useMemo(() => {
+        if (view !== 'branches') return null;
         const pts = branches
             .filter((b) => Number.isFinite(b.lat) && Number.isFinite(b.lng))
-            .map((b) => ({ lat: Number(b.lat), lng: Number(b.lng) }));
+            .map((b) => [b.lat, b.lng] as [number, number]);
+        if (pts.length === 0) return null;
+        if (pts.length === 1) return L.latLngBounds(pts[0], pts[0]).pad(0.5);
+        return L.latLngBounds(pts);
+    }, [view, branches]);
 
-        if (pts.length === 0) return;
-        if (pts.length === 1) {
-            branchMapRef.current.setCenter(pts[0]);
-            branchMapRef.current.setZoom(10);
-            hasFittedBranchMap.current = true;
-            return;
-        }
-
-        const bounds = new gm.LatLngBounds();
-        pts.forEach((p) => bounds.extend(p));
-        branchMapRef.current.fitBounds(bounds);
-        hasFittedBranchMap.current = true;
-    }, [view, branches, isGoogleLoaded]);
-
+    // Fit branch map when bounds change
     useEffect(() => {
-        if (view !== 'walks' || !isGoogleLoaded || !walkMapRef.current) return;
-        const gm = (window as any).google?.maps;
-        if (!gm) return;
+        if (view !== 'branches' || !branchMapRef.current || hasFittedBranchMap.current || !branchBounds) return;
+        branchMapRef.current.fitBounds(branchBounds, { padding: [40, 40] });
+        hasFittedBranchMap.current = true;
+    }, [view, branchBounds]);
+
+    // Compute walk map bounds
+    const walkMapBounds = useMemo((): L.LatLngBounds | null => {
+        if (view !== 'walks') return null;
 
         if (selectedWalk) {
             const pts = getWalkTrackPoints(selectedWalk);
-
             if (pts.length > 1) {
-                const bounds = new gm.LatLngBounds();
-                pts.forEach((p: any) => bounds.extend(p));
-                walkMapRef.current.fitBounds(bounds);
-                return;
+                return L.latLngBounds(pts.map(p => [p.lat, p.lng] as [number, number]));
             }
-            const selectedStartPt = toLatLng(selectedWalk.startLocation);
-            const selectedEndPt = toLatLng(selectedWalk.endLocation);
-            if (selectedStartPt && selectedEndPt && (selectedStartPt.lat !== selectedEndPt.lat || selectedStartPt.lng !== selectedEndPt.lng)) {
-                const bounds = new gm.LatLngBounds();
-                bounds.extend(selectedStartPt);
-                bounds.extend(selectedEndPt);
-                walkMapRef.current.fitBounds(bounds);
-                return;
+            const startPt = toLatLng(selectedWalk.startLocation);
+            const endPt = toLatLng(selectedWalk.endLocation);
+            if (startPt && endPt && (startPt.lat !== endPt.lat || startPt.lng !== endPt.lng)) {
+                return L.latLngBounds(
+                    [startPt.lat, startPt.lng],
+                    [endPt.lat, endPt.lng]
+                );
             }
-            if (selectedStartPt) {
-                walkMapRef.current.panTo(selectedStartPt);
-                walkMapRef.current.setZoom(15);
-                return;
-            }
+            // Single point — handled by FitToCenter below
+            return null;
         }
 
-        const allPts = walks
-            .flatMap((w) => getWalkTrackPoints(w));
-
+        const allPts = walks.flatMap((w) => getWalkTrackPoints(w));
         if (allPts.length > 1) {
-            const bounds = new gm.LatLngBounds();
-            allPts.forEach((p: any) => bounds.extend(p));
-            walkMapRef.current.fitBounds(bounds);
-        } else if (selectedBranch?.lat && selectedBranch?.lng) {
-            walkMapRef.current.panTo({ lat: Number(selectedBranch.lat), lng: Number(selectedBranch.lng) });
-            walkMapRef.current.setZoom(13);
+            return L.latLngBounds(allPts.map(p => [p.lat, p.lng] as [number, number]));
         }
-    }, [view, isGoogleLoaded, selectedWalk, walks, selectedBranch]);
+        return null;
+    }, [view, selectedWalk, walks]);
+
+    // Single-point center for selected walk
+    const walkSingleCenter = useMemo((): [number, number] | null => {
+        if (view !== 'walks' || !selectedWalk) return null;
+        const pts = getWalkTrackPoints(selectedWalk);
+        if (pts.length > 1) return null;
+        const startPt = toLatLng(selectedWalk.startLocation);
+        if (startPt) return [startPt.lat, startPt.lng];
+        return null;
+    }, [view, selectedWalk]);
 
     // ── Open branch drilldown ───────────────────────────────────────────────
     const openBranch = useCallback(async (branch: any) => {
@@ -333,74 +375,48 @@ export default function DashboardPage() {
                                     <div className="text-muted-foreground font-black text-xs uppercase tracking-widest">Loading map…</div>
                                 </div>
                             </div>
-                        ) : !GOOGLE_MAPS_API_KEY ? (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                                <div className="text-center space-y-2">
-                                    <div className="text-foreground font-black text-sm">Google Maps key missing</div>
-                                    <div className="text-muted-foreground text-xs">Set <code>VITE_GOOGLE_MAPS_API_KEY</code> in admin env.</div>
-                                </div>
-                            </div>
-                        ) : googleLoadError ? (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                                <div className="text-center space-y-2">
-                                    <div className="text-foreground font-black text-sm">Failed to load Google Maps</div>
-                                    <div className="text-muted-foreground text-xs">Check API key restrictions and network.</div>
-                                </div>
-                            </div>
-                        ) : !isGoogleLoaded ? (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                                <div className="text-center space-y-3">
-                                    <RefreshCcw className="h-10 w-10 text-primary/30 animate-spin mx-auto" />
-                                    <div className="text-muted-foreground font-black text-xs uppercase tracking-widest">Loading Google map…</div>
-                                </div>
-                            </div>
                         ) : (
-                            <GoogleMap
-                                center={{ lat: 20, lng: 0 }}
+                            <MapContainer
+                                center={[20, 0]}
                                 zoom={2}
-                                mapContainerStyle={mapContainerStyle}
-                                onLoad={(map) => { branchMapRef.current = map; }}
-                                options={{
-                                    mapTypeControl: false,
-                                    streetViewControl: false,
-                                    fullscreenControl: false,
-                                }}
+                                style={{ height: '100%', width: '100%' }}
+                                ref={branchMapRef}
+                                zoomControl={true}
                             >
+                                <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
+                                {branchBounds && !hasFittedBranchMap.current && (
+                                    <FitBounds bounds={branchBounds} />
+                                )}
                                 {branches
                                     .filter(b => b.lat && b.lng && isFinite(b.lat) && isFinite(b.lng))
                                     .map(b => {
-                                        const stat = branchStats[b.slug] || { count: 0, distance: 0, duration: 0 };
                                         const isHovered = hoveredBranch === b.slug;
                                         return (
                                             <React.Fragment key={b.id}>
-                                                <CircleF
-                                                    center={{ lat: b.lat, lng: b.lng }}
+                                                <Circle
+                                                    center={[b.lat, b.lng]}
                                                     radius={b.radiusMeters || 1000}
-                                                    options={{
-                                                        strokeColor: isHovered ? '#2563EB' : '#64748b',
-                                                        strokeWeight: 1.5,
-                                                        strokeOpacity: isHovered ? 0.7 : 0.3,
+                                                    pathOptions={{
+                                                        color: isHovered ? '#2563EB' : '#64748b',
+                                                        weight: 1.5,
+                                                        opacity: isHovered ? 0.7 : 0.3,
                                                         fillColor: isHovered ? '#2563EB' : '#64748b',
                                                         fillOpacity: isHovered ? 0.08 : 0.03,
                                                     }}
                                                 />
-                                                <MarkerF
-                                                    position={{ lat: b.lat, lng: b.lng }}
-                                                    label={{
-                                                        text: stat.count > 999 ? '1k+' : (stat.count > 0 ? String(stat.count) : '·'),
-                                                        fontSize: '11px',
-                                                        fontWeight: '900',
-                                                        color: '#ffffff',
+                                                <Marker
+                                                    position={[b.lat, b.lng]}
+                                                    icon={isHovered ? BRANCH_ICON_HOVER : BRANCH_ICON}
+                                                    eventHandlers={{
+                                                        click: () => openBranch(b),
+                                                        mouseover: () => setHoveredBranch(b.slug),
+                                                        mouseout: () => setHoveredBranch(null),
                                                     }}
-                                                    icon={{ url: isHovered ? 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/darkblue-dot.png' }}
-                                                    onClick={() => openBranch(b)}
-                                                    onMouseOver={() => setHoveredBranch(b.slug)}
-                                                    onMouseOut={() => setHoveredBranch(null)}
                                                 />
                                             </React.Fragment>
                                         );
                                     })}
-                            </GoogleMap>
+                            </MapContainer>
                         )}
 
                         {/* Map legend */}
@@ -521,95 +537,79 @@ export default function DashboardPage() {
 
             {/* ── Walk Map ── */}
             <div className="flex-1 relative">
-                {!GOOGLE_MAPS_API_KEY ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                        <div className="text-center space-y-2">
-                            <div className="text-foreground font-black text-sm">Google Maps key missing</div>
-                            <div className="text-muted-foreground text-xs">Set <code>VITE_GOOGLE_MAPS_API_KEY</code> in admin env.</div>
-                        </div>
-                    </div>
-                ) : googleLoadError ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                        <div className="text-center space-y-2">
-                            <div className="text-foreground font-black text-sm">Failed to load Google Maps</div>
-                            <div className="text-muted-foreground text-xs">Check API key restrictions and network.</div>
-                        </div>
-                    </div>
-                ) : !isGoogleLoaded ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
-                        <div className="text-center space-y-3">
-                            <RefreshCcw className="h-10 w-10 text-primary/30 animate-spin mx-auto" />
-                            <div className="text-muted-foreground font-black text-xs uppercase tracking-widest">Loading Google map…</div>
-                        </div>
-                    </div>
-                ) : (
-                    <GoogleMap
-                        center={{ lat: mapCenter[0], lng: mapCenter[1] }}
-                        zoom={12}
-                        mapContainerStyle={mapContainerStyle}
-                        onLoad={(map) => { walkMapRef.current = map; }}
-                        options={{
-                            mapTypeControl: false,
-                            streetViewControl: false,
-                            fullscreenControl: false,
-                        }}
-                    >
-                        {selectedBranch?.lat && selectedBranch?.lng && (
-                            <CircleF
-                                center={{ lat: selectedBranch.lat, lng: selectedBranch.lng }}
-                                radius={selectedBranch.radiusMeters || 1000}
-                                options={{ strokeColor: '#3b82f6', strokeWeight: 1.5, strokeOpacity: 0.4, fillColor: '#3b82f6', fillOpacity: 0.04 }}
-                            />
-                        )}
+                <MapContainer
+                    center={mapCenter}
+                    zoom={12}
+                    style={{ height: '100%', width: '100%' }}
+                    zoomControl={true}
+                >
+                    <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
 
-                        {filteredWalks.map(w => {
-                            const pts = getWalkTrackPoints(w);
-                            const walkIdentity = w.__walkKey || getWalkIdentity(w);
-                            const isActive = selectedWalkKey === walkIdentity;
+                    {walkMapBounds && <FitBounds bounds={walkMapBounds} />}
+                    {walkSingleCenter && <FitToCenter center={walkSingleCenter} zoom={15} />}
+                    {!walkMapBounds && !walkSingleCenter && selectedBranch?.lat && selectedBranch?.lng && (
+                        <FitToCenter center={[selectedBranch.lat, selectedBranch.lng]} zoom={13} />
+                    )}
 
-                            const startPt = pts.length > 0
-                                ? pts[0]
-                                : toLatLng(w.startLocation);
-                            const endPt = pts.length > 1
-                                ? pts[pts.length - 1]
-                                : toLatLng(w.endLocation);
+                    {selectedBranch?.lat && selectedBranch?.lng && (
+                        <Circle
+                            center={[selectedBranch.lat, selectedBranch.lng]}
+                            radius={selectedBranch.radiusMeters || 1000}
+                            pathOptions={{ color: '#3b82f6', weight: 1.5, opacity: 0.4, fillColor: '#3b82f6', fillOpacity: 0.04 }}
+                        />
+                    )}
 
-                            if (!startPt && pts.length < 1) return null;
+                    {filteredWalks.map(w => {
+                        const pts = getWalkTrackPoints(w);
+                        const walkIdentity = w.__walkKey || getWalkIdentity(w);
+                        const isActive = selectedWalkKey === walkIdentity;
 
-                            return (
-                                <React.Fragment key={walkIdentity}>
-                                    {pts.length > 1 && (
-                                        <PolylineF
-                                            path={pts}
-                                            options={{
-                                                strokeColor: isActive ? '#2563EB' : '#94a3b8',
-                                                strokeWeight: isActive ? 6 : 2,
-                                                strokeOpacity: isActive ? 1 : 0.55,
-                                            }}
-                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
-                                        />
-                                    )}
-                                    {startPt && (
-                                        <MarkerF
-                                            position={startPt}
-                                            icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
-                                            label={{ text: 'S', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
-                                        />
-                                    )}
-                                    {endPt && (endPt.lat !== startPt?.lat || endPt.lng !== startPt?.lng) && (
-                                        <MarkerF
-                                            position={endPt}
-                                            icon={{ url: isActive ? 'http://maps.google.com/mapfiles/ms/icons/red-dot.png' : 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png' }}
-                                            label={{ text: 'E', fontSize: '11px', fontWeight: '900', color: '#ffffff' }}
-                                            onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
-                                        />
-                                    )}
-                                </React.Fragment>
-                            );
-                        })}
-                    </GoogleMap>
-                )}
+                        const startPt = pts.length > 0
+                            ? pts[0]
+                            : toLatLng(w.startLocation);
+                        const endPt = pts.length > 1
+                            ? pts[pts.length - 1]
+                            : toLatLng(w.endLocation);
+
+                        if (!startPt && pts.length < 1) return null;
+
+                        return (
+                            <React.Fragment key={walkIdentity}>
+                                {pts.length > 1 && (
+                                    <Polyline
+                                        positions={pts.map(p => [p.lat, p.lng] as [number, number])}
+                                        pathOptions={{
+                                            color: isActive ? '#2563EB' : '#94a3b8',
+                                            weight: isActive ? 6 : 2,
+                                            opacity: isActive ? 1 : 0.55,
+                                        }}
+                                        eventHandlers={{
+                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
+                                        }}
+                                    />
+                                )}
+                                {startPt && (
+                                    <Marker
+                                        position={[startPt.lat, startPt.lng]}
+                                        icon={isActive ? START_ICON_ACTIVE : START_ICON}
+                                        eventHandlers={{
+                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
+                                        }}
+                                    />
+                                )}
+                                {endPt && (endPt.lat !== startPt?.lat || endPt.lng !== startPt?.lng) && (
+                                    <Marker
+                                        position={[endPt.lat, endPt.lng]}
+                                        icon={isActive ? END_ICON_ACTIVE : END_ICON}
+                                        eventHandlers={{
+                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
+                                        }}
+                                    />
+                                )}
+                            </React.Fragment>
+                        );
+                    })}
+                </MapContainer>
 
                 {/* Stats pills — bottom left */}
                 <div className="absolute bottom-8 left-4 z-[500] flex gap-1.5 flex-wrap">

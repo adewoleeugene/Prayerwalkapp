@@ -1,12 +1,9 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { resolveApiBaseUrl } from '../network/baseUrl';
 
 const DEVICE_FINGERPRINT_KEY = 'device_fingerprint';
 const BASE_URL = resolveApiBaseUrl();
-if (__DEV__) {
-    console.log(`[API] BASE_URL=${BASE_URL}`);
-}
 
 const client = axios.create({
     baseURL: BASE_URL,
@@ -18,9 +15,8 @@ const client = axios.create({
 
 client.interceptors.request.use(async (config) => {
     const headers = config.headers ?? {};
-    const fingerprint = await AsyncStorage.getItem(DEVICE_FINGERPRINT_KEY);
 
-    (headers as any).Authorization = `Bearer bypass-token`;
+    const fingerprint = await SecureStore.getItemAsync(DEVICE_FINGERPRINT_KEY);
     if (fingerprint) {
         (headers as any)['x-device-fingerprint'] = fingerprint;
     }
@@ -30,11 +26,6 @@ client.interceptors.request.use(async (config) => {
 });
 
 export const api = {
-    auth: {
-        login: (email: string, password: string) => client.post('/auth/login', { email, password }),
-        signup: (email: string, password: string, name: string) => client.post('/auth/signup', { email, password, name }),
-        me: () => client.get('/users/me'),
-    },
     locations: {
         list: (lat: number, lng: number, radius: number) => client.get('/locations', { params: { lat, lng, radius } }),
         get: (id: string) => client.get(`/locations/${id}`),

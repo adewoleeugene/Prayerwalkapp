@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/db';
 import { executeRawQuery } from '../lib/db';
-import { authenticate } from '../middleware/authMiddleware';
+import { deviceAuth } from '../middleware/deviceAuthMiddleware';
 import { validateGPSUpdate } from '../lib/gps';
 import { logger } from '../lib/logger';
 import { DomainError } from '../errors/domainError';
@@ -21,7 +21,7 @@ import { arriveAtLocation, completeWalk, startWalk } from '../services/walks/wal
 const router = Router();
 
 // GET /walks/history - show completed walk paths on map
-router.get('/history', authenticate, async (req: Request, res: Response) => {
+router.get('/history', deviceAuth, async (req: Request, res: Response) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const hasSearch = q.length >= 2;
@@ -127,8 +127,16 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
       });
     }
 
+    // Regular (anonymous) users only see walks from their own device.
+    // Admins/superadmins see all walks (scoped by branch if applicable).
+    const deviceFingerprint = typeof req.headers['x-device-fingerprint'] === 'string'
+      ? req.headers['x-device-fingerprint'].trim()
+      : '';
+    const isAnonymousUser = role === 'user' && deviceFingerprint.length >= 4;
+
     const baseWhere: any = {
       status: { in: statusFilter as any },
+      ...(isAnonymousUser ? { deviceFingerprint } : {}),
       ...(
         timelineFilter.gte || timelineFilter.lte
           ? { updatedAt: timelineFilter }
@@ -197,39 +205,20 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
         let geometryType: 'path' | 'spot' = 'path';
         let routeQuality: 'high' | 'medium' | 'low' = 'high';
 
-        if (points.length < 2 && rawGpsPoints.length >= 2) {
-          const first = rawGpsPoints[0];
-          const last = rawGpsPoints[rawGpsPoints.length - 1];
-          if (first && last && (first.latitude !== last.latitude || first.longitude !== last.longitude)) {
-            points = [first, last];
-            routeQuality = 'medium';
-          }
+        // If cleaning removed too many points, try using all raw GPS points
+        if (points.length < 3 && rawGpsPoints.length >= 3) {
+          points = rawGpsPoints;
+          routeQuality = 'medium';
         }
 
-        if (points.length < 2) {
+        // If we still don't have a real path (3+ points), fall back to spot markers only
+        if (points.length < 3) {
           const fallback = [startPoint, currentPoint].filter(
             (point): point is { latitude: number; longitude: number } => !!point
           );
 
-          if (fallback.length >= 2) {
-            const uniqueFallback = cleanRoutePoints(fallback);
-            const firstFallback = fallback[0];
-            const lastFallback = fallback[fallback.length - 1];
-            const fallbackMoved = !!firstFallback && !!lastFallback &&
-              (firstFallback.latitude !== lastFallback.latitude || firstFallback.longitude !== lastFallback.longitude);
-            if (uniqueFallback.length >= 2) {
-              points = uniqueFallback;
-              routeQuality = 'low';
-            } else if (fallbackMoved) {
-              points = [firstFallback, lastFallback];
-              routeQuality = 'low';
-            } else {
-              points = [uniqueFallback[0]];
-              geometryType = 'spot';
-              routeQuality = 'low';
-            }
-          } else if (fallback.length === 1) {
-            points = [fallback[0]];
+          if (fallback.length >= 1) {
+            points = fallback;
             geometryType = 'spot';
             routeQuality = 'low';
           } else {
@@ -414,7 +403,7 @@ router.get('/history', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /walks/start
-router.post('/start', authenticate, async (req: Request, res: Response) => {
+router.post('/start', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { locationId, latitude, longitude, deviceFingerprint, branch, participants, startAddress, clientRequestId, clientEventAt, localSessionId } = req.body;
     const result = await executeIdempotentRequest({
@@ -484,7 +473,7 @@ router.post('/start', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /walks/track (replaces WebSocket for serverless)
-router.post('/track', authenticate, async (req: Request, res: Response) => {
+router.post('/track', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { sessionId, latitude, longitude, speed, accuracy, isMock, clientRequestId, clientEventAt } = req.body;
     const userId = req.user!.userId;
@@ -521,7 +510,7 @@ router.post('/track', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /walks/arrive
-router.post('/arrive', authenticate, async (req: Request, res: Response) => {
+router.post('/arrive', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { sessionId, locationId, latitude, longitude, clientRequestId, clientEventAt } = req.body;
     const result = await executeIdempotentRequest({
@@ -572,7 +561,7 @@ router.post('/arrive', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /walks/complete
-router.post('/complete', authenticate, async (req: Request, res: Response) => {
+router.post('/complete', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal, clientRequestId, clientEventAt, localSessionId } = req.body;
     const result = await executeIdempotentRequest({

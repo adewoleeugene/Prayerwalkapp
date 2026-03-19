@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { executeRawQuery, calculateDistance } from '../lib/db';
-import { authenticate } from '../middleware/authMiddleware';
+import { deviceAuth } from '../middleware/deviceAuthMiddleware';
 
 const router = Router();
 
@@ -18,7 +18,7 @@ type BranchRow = {
 };
 
 // GET /branches - Active branches, optionally sorted by proximity
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', deviceAuth, async (req: Request, res: Response) => {
   try {
     const latRaw = req.query.lat;
     const lngRaw = req.query.lng;

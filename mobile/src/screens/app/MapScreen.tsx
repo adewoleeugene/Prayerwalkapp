@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, StyleSheet, Alert, Dimensions, Text, TouchableOpacity, Modal, TextInput, Platform, Keyboard, TouchableWithoutFeedback, Animated, ScrollView, FlatList } from 'react-native';
-import MapView, { Marker, Callout, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import { LocateFixed } from 'lucide-react-native';
 import { api } from '../../api/client';
 import { useWalkTimer } from '../../features/walk/hooks/useWalkTimer';
@@ -17,6 +17,7 @@ import {
 } from '../../features/walk/offline/offlineWalkApi';
 import { getSyncStatusSnapshot, subscribeSyncStatus } from '../../features/walk/offline/syncEngine';
 import { SyncStatus } from '../../features/walk/offline/types';
+import { LeafletMap, LeafletMapHandle, LeafletMapMarker, LeafletMapPolyline } from '../../components/maps/LeafletMap';
 
 const { width, height } = Dimensions.get('window');
 const BRANCHES_CACHE_KEY = 'branches_cache_v1';
@@ -84,7 +85,8 @@ function parseLocationCoordinates(raw: any): { latitude: number; longitude: numb
 }
 
 export default function MapScreen() {
-    const mapRef = useRef<MapView | null>(null);
+    const navigation = useNavigation<any>();
+    const mapRef = useRef<LeafletMapHandle | null>(null);
     const locationSubscription = useRef<Location.LocationSubscription | null>(null);
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [locations, setLocations] = useState<any[]>([]);
@@ -232,15 +234,10 @@ export default function MapScreen() {
 
             if (location?.coords) {
                 setActiveRoutePoints([{ latitude: location.coords.latitude, longitude: location.coords.longitude }]);
-                mapRef.current?.animateToRegion(
-                    {
-                        latitude: location.coords.latitude,
-                        longitude: location.coords.longitude,
-                        latitudeDelta: 0.008,
-                        longitudeDelta: 0.008,
-                    },
-                    250
-                );
+                mapRef.current?.centerOn({
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                }, 17);
             } else {
                 setActiveRoutePoints([]);
             }
@@ -262,15 +259,10 @@ export default function MapScreen() {
                         if (calculateDistanceMeters(last, nextPoint) < 2) return prev;
                         return [...prev, nextPoint];
                     });
-                    mapRef.current?.animateToRegion(
-                        {
-                            latitude: loc.coords.latitude,
-                            longitude: loc.coords.longitude,
-                            latitudeDelta: 0.01,
-                            longitudeDelta: 0.01,
-                        },
-                        400
-                    );
+                    mapRef.current?.centerOn({
+                        latitude: loc.coords.latitude,
+                        longitude: loc.coords.longitude,
+                    }, 16);
                     void trackWalkOnlineOrQueue({
                         sessionId: activeWalk.sessionId,
                         latitude: loc.coords.latitude,
@@ -301,11 +293,12 @@ export default function MapScreen() {
 
     useEffect(() => {
         (async () => {
-            // Setup Fingerprint
-            let fp = await AsyncStorage.getItem('device_fingerprint');
+            // Setup Fingerprint (stored securely)
+            const SecureStore = await import('expo-secure-store');
+            let fp = await SecureStore.getItemAsync('device_fingerprint');
             if (!fp) {
                 fp = Math.random().toString(36).substring(7) + Date.now().toString(36);
-                await AsyncStorage.setItem('device_fingerprint', fp);
+                await SecureStore.setItemAsync('device_fingerprint', fp);
             }
             setFingerprint(fp);
 
@@ -454,10 +447,7 @@ export default function MapScreen() {
 
         hasFocusedHistory.current = true;
         setTimeout(() => {
-            mapRef.current?.fitToCoordinates(historyPoints, {
-                edgePadding: { top: 120, right: 80, bottom: 200, left: 80 },
-                animated: true
-            });
+            mapRef.current?.fitToCoordinates(historyPoints);
         }, 500);
     }, [walkHistory, location, activeWalk]);
 
@@ -666,6 +656,15 @@ export default function MapScreen() {
                 setActiveWalk(nextActiveWalk);
                 await saveActiveWalkState(nextActiveWalk);
                 fetchWalkHistory();
+                navigation.navigate('Walk', {
+                    session: {
+                        ...session,
+                        id: String(session?.id),
+                        branch: String(session?.branch || branchForStart || 'International'),
+                        participants: parsedParticipants,
+                    },
+                    targetLocation: targetLocation || null,
+                });
                 if (res.data.queued) {
                     Alert.alert('Offline Start', 'Walk started offline. Data will sync automatically when internet returns.');
                 }
@@ -715,15 +714,10 @@ export default function MapScreen() {
             });
 
             setLocation(latestLocation);
-            mapRef.current?.animateToRegion(
-                {
-                    latitude: latestLocation.coords.latitude,
-                    longitude: latestLocation.coords.longitude,
-                    latitudeDelta: 0.008,
-                    longitudeDelta: 0.008,
-                },
-                350
-            );
+            mapRef.current?.centerOn({
+                latitude: latestLocation.coords.latitude,
+                longitude: latestLocation.coords.longitude,
+            }, 17);
         } catch {
             Alert.alert('Location Error', 'Unable to get your current location right now.');
         }
@@ -790,96 +784,121 @@ export default function MapScreen() {
         }
     };
 
+    const currentCenter = location?.coords
+        ? {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+        }
+        : {
+            latitude: DEFAULT_REGION.latitude,
+            longitude: DEFAULT_REGION.longitude,
+        };
+
+    const mapMarkers: LeafletMapMarker[] = [
+        ...(canShowUserLocation && location?.coords ? [{
+            id: 'user-location',
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            title: 'Your location',
+            color: '#2563EB',
+        }] : []),
+    ];
+
+    walkHistory.forEach((walk) => {
+        const point = walk.geometryType === 'path'
+            ? walk.points[walk.points.length - 1]
+            : walk.points[0];
+
+        if (!point) return;
+
+        mapMarkers.push({
+            id: `history-${walk.sessionId}`,
+            latitude: point.latitude,
+            longitude: point.longitude,
+            title: toHistoryLabel(walk),
+            description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`,
+            color: walk.walkType === 'area' ? '#1C7ED6' : '#E03131',
+        });
+    });
+
+    locations.forEach((loc) => {
+        const coordinate = parseLocationCoordinates(loc.location?.coordinates || loc.location);
+        if (!coordinate) return;
+
+        mapMarkers.push({
+            id: `location-${loc.id}`,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            title: loc.name,
+            description: `Tap to begin prayer walk${loc.points ? ` • ${loc.points} XP` : ''}`,
+            color: '#16A34A',
+        });
+    });
+
+    const mapPolylines: LeafletMapPolyline[] = [
+        ...(activeWalk && activeRoutePoints.length >= 3 ? [{
+            id: 'active-route',
+            coordinates: activeRoutePoints,
+            color: 'rgba(37, 99, 235, 0.92)',
+            width: 6,
+        }] : []),
+        ...walkHistory
+            .filter((walk) => walk.geometryType === 'path' && walk.points.length >= 3)
+            .map((walk) => {
+                const strokeOpacity = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
+                const color = walk.walkType === 'area'
+                    ? `rgba(38, 132, 255, ${strokeOpacity})`
+                    : `rgba(255, 59, 48, ${strokeOpacity})`;
+
+                return {
+                    id: `history-line-${walk.sessionId}`,
+                    coordinates: walk.points,
+                    color,
+                    width: 7,
+                };
+            }),
+    ];
+
+    const handleMapMarkerPress = (markerId: string) => {
+        if (markerId.startsWith('location-')) {
+            const locationId = markerId.replace('location-', '');
+            const nextLocation = locations.find((loc) => String(loc.id) === locationId);
+            if (nextLocation) {
+                openStartDrawer(nextLocation);
+            }
+            return;
+        }
+
+        if (markerId.startsWith('history-')) {
+            const sessionId = markerId.replace('history-', '');
+            const selected = walkHistory.find((walk) => walk.sessionId === sessionId);
+            if (selected) {
+                openHistoryDetails(selected);
+            }
+        }
+    };
+
+    const handleMapPolylinePress = (polylineId: string) => {
+        if (!polylineId.startsWith('history-line-')) return;
+        const sessionId = polylineId.replace('history-line-', '');
+        const selected = walkHistory.find((walk) => walk.sessionId === sessionId);
+        if (selected) {
+            openHistoryDetails(selected);
+        }
+    };
+
     return (
         <View style={styles.container}>
-            <MapView
-                ref={(ref) => { mapRef.current = ref; }}
+            <LeafletMap
+                ref={mapRef}
                 style={styles.map}
-                initialRegion={location ? {
-                    latitude: location.coords.latitude,
-                    longitude: location.coords.longitude,
-                    latitudeDelta: 0.05,
-                    longitudeDelta: 0.05,
-                } : DEFAULT_REGION}
-                showsUserLocation={canShowUserLocation}
-                showsMyLocationButton={false}
-                followsUserLocation={!!activeWalk && !!location}
-            >
-                    {activeWalk && activeRoutePoints.length > 1 && (
-                        <Polyline
-                            coordinates={activeRoutePoints}
-                            strokeColor="rgba(37, 99, 235, 0.92)"
-                            strokeWidth={6}
-                            geodesic
-                            lineCap="round"
-                            lineJoin="round"
-                        />
-                    )}
-                    {walkHistory.map((walk) => {
-                        const strokeOpacity = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
-                        const strokeColor = walk.walkType === 'area'
-                            ? `rgba(38, 132, 255, ${strokeOpacity})`
-                            : `rgba(255, 59, 48, ${strokeOpacity})`;
-                        const trackPoints = walk.points;
-
-                        if (walk.geometryType === 'path' && trackPoints.length > 1) {
-                            return (
-                                <React.Fragment key={walk.sessionId}>
-                                    <Polyline
-                                        coordinates={trackPoints}
-                                        strokeColor={strokeColor}
-                                        strokeWidth={7}
-                                        geodesic
-                                        lineCap="round"
-                                        lineJoin="round"
-                                        tappable
-                                        onPress={() => openHistoryDetails(walk)}
-                                    />
-                                    <Marker
-                                        coordinate={trackPoints[trackPoints.length - 1]}
-                                        title={toHistoryLabel(walk)}
-                                        pinColor={walk.walkType === 'area' ? '#1C7ED6' : '#E03131'}
-                                        onPress={() => openHistoryDetails(walk)}
-                                    />
-                                </React.Fragment>
-                            );
-                        }
-
-                        const first = walk.points[0];
-                        if (!first) return null;
-                        return (
-                            <Marker
-                                key={`spot-${walk.sessionId}`}
-                                coordinate={first}
-                                title={toHistoryLabel(walk)}
-                                pinColor={walk.walkType === 'area' ? '#1C7ED6' : '#E8590C'}
-                                onPress={() => openHistoryDetails(walk)}
-                            />
-                        );
-                    })}
-
-                    {locations.map((loc) => {
-                        const coordinate = parseLocationCoordinates(loc.location?.coordinates || loc.location);
-                        if (!coordinate) return null;
-
-                        return (
-                            <Marker
-                                key={loc.id}
-                                coordinate={coordinate}
-                            >
-                                <Callout onPress={() => openStartDrawer(loc)}>
-                                    <View style={styles.callout}>
-                                        <Text style={styles.calloutTitle}>{loc.name}</Text>
-                                        <Text style={styles.pointsText}>✨ {loc.points} XP</Text>
-                                        <TouchableOpacity style={styles.startButton}>
-                                            <Text style={styles.startButtonText}>Begin Prayer Walk</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </Callout>
-                            </Marker>
-                        );
-                    })}
-            </MapView>
+                initialCenter={currentCenter}
+                initialZoom={13}
+                markers={mapMarkers}
+                polylines={mapPolylines}
+                onMarkerPress={handleMapMarkerPress}
+                onPolylinePress={handleMapPolylinePress}
+            />
 
             {!location && (
                 <View style={styles.loading}>
@@ -1235,31 +1254,6 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.22,
         shadowRadius: 4,
-    },
-    callout: {
-        width: 180,
-        padding: 5,
-    },
-    calloutTitle: {
-        fontWeight: 'bold',
-        fontSize: 14,
-        marginBottom: 2,
-    },
-    pointsText: {
-        fontSize: 12,
-        color: '#666',
-        marginBottom: 8,
-    },
-    startButton: {
-        backgroundColor: '#4C6EF5',
-        padding: 8,
-        borderRadius: 5,
-    },
-    startButtonText: {
-        color: '#fff',
-        textAlign: 'center',
-        fontWeight: 'bold',
-        fontSize: 12,
     },
     fabStartButton: {
         alignSelf: 'center',

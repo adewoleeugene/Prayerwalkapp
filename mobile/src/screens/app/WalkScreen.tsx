@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput, Platform, Animated } from 'react-native';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useNavigation } from '@react-navigation/native';
 import { Navigation, MapPin, CheckCircle, Check, PenLine, AlignLeft } from 'lucide-react-native';
 import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
@@ -17,6 +16,7 @@ import {
 } from '../../features/walk/offline/offlineWalkApi';
 import { getSyncStatusSnapshot, subscribeSyncStatus, triggerOfflineSync } from '../../features/walk/offline/syncEngine';
 import { SyncStatus } from '../../features/walk/offline/types';
+import { LeafletMap, LeafletMapMarker, LeafletMapPolyline } from '../../components/maps/LeafletMap';
 
 export default function WalkScreen({ route }: { route: any }) {
     const { session, targetLocation } = route.params;
@@ -69,6 +69,31 @@ export default function WalkScreen({ route }: { route: any }) {
     };
 
     const targetCoords = getTargetCoords();
+    const liveMapMarkers: LeafletMapMarker[] = [
+        ...(currentLocation ? [{
+            id: 'current-location',
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+            title: 'Your location',
+            color: '#2563EB',
+        }] : []),
+        ...(targetCoords ? [{
+            id: 'target-location',
+            latitude: targetCoords.latitude,
+            longitude: targetCoords.longitude,
+            title: targetLocation?.name || 'Prayer Target',
+            color: '#F59E0B',
+        }] : []),
+    ];
+    // Require 3+ points for a real path — 2 points would just draw a straight line
+    const liveMapPolylines: LeafletMapPolyline[] = routePoints.length >= 3
+        ? [{
+            id: 'live-route',
+            coordinates: routePoints,
+            color: '#4F46E5',
+            width: 5,
+        }]
+        : [];
 
     useEffect(() => {
         if (session.participants) {
@@ -142,8 +167,8 @@ export default function WalkScreen({ route }: { route: any }) {
         const sub = await Location.watchPositionAsync(
             {
                 accuracy: Location.Accuracy.Balanced,
-                timeInterval: 3000,
-                distanceInterval: 10,
+                timeInterval: 2000,
+                distanceInterval: 3,
             },
             (loc) => handleLocationUpdate(loc)
         );
@@ -274,33 +299,36 @@ export default function WalkScreen({ route }: { route: any }) {
 
                 {!!summaryStart && (
                     <View style={styles.mapCard}>
-                        <MapView
+                        <LeafletMap
                             style={styles.map}
-                            initialRegion={{
+                            initialCenter={{
                                 latitude: summaryStart.latitude,
                                 longitude: summaryStart.longitude,
-                                latitudeDelta: 0.01,
-                                longitudeDelta: 0.01,
                             }}
-                        >
-                            {walkSummary.routePoints.length > 1 && (
-                                <Polyline
-                                    coordinates={walkSummary.routePoints}
-                                    strokeColor="#4F46E5"
-                                    strokeWidth={5}
-                                />
-                            )}
-                            {walkSummary.routePoints[0] && (
-                                <Marker coordinate={walkSummary.routePoints[0]} title="Start" pinColor="#10B981" />
-                            )}
-                            {walkSummary.routePoints.length > 1 && (
-                                <Marker
-                                    coordinate={walkSummary.routePoints[walkSummary.routePoints.length - 1]}
-                                    title="End"
-                                    pinColor="#EF4444"
-                                />
-                            )}
-                        </MapView>
+                            initialZoom={15}
+                            markers={[
+                                ...(walkSummary.routePoints[0] ? [{
+                                    id: 'summary-start',
+                                    latitude: walkSummary.routePoints[0].latitude,
+                                    longitude: walkSummary.routePoints[0].longitude,
+                                    title: 'Start',
+                                    color: '#10B981',
+                                }] : []),
+                                ...(walkSummary.routePoints.length > 1 ? [{
+                                    id: 'summary-end',
+                                    latitude: walkSummary.routePoints[walkSummary.routePoints.length - 1].latitude,
+                                    longitude: walkSummary.routePoints[walkSummary.routePoints.length - 1].longitude,
+                                    title: 'End',
+                                    color: '#EF4444',
+                                }] : []),
+                            ]}
+                            polylines={walkSummary.routePoints.length >= 3 ? [{
+                                id: 'summary-route',
+                                coordinates: walkSummary.routePoints,
+                                color: '#4F46E5',
+                                width: 5,
+                            }] : []}
+                        />
                     </View>
                 )}
 
@@ -351,40 +379,16 @@ export default function WalkScreen({ route }: { route: any }) {
             {/* Map Area */}
             {currentLocation && (
                 <View style={styles.mapCard}>
-                    <MapView
+                    <LeafletMap
                         style={styles.map}
-                        initialRegion={{
+                        initialCenter={{
                             latitude: currentLocation.latitude,
                             longitude: currentLocation.longitude,
-                            latitudeDelta: 0.005,
-                            longitudeDelta: 0.005,
                         }}
-                        region={{
-                            latitude: currentLocation.latitude,
-                            longitude: currentLocation.longitude,
-                            latitudeDelta: 0.005,
-                            longitudeDelta: 0.005,
-                        }}
-                        showsUserLocation={canShowUserLocation}
-                        userInterfaceStyle="light"
-                    >
-                        {routePoints.length > 1 && (
-                            <Polyline
-                                coordinates={routePoints}
-                                strokeColor="#4F46E5"
-                                strokeWidth={5}
-                                lineCap="round"
-                                lineJoin="round"
-                            />
-                        )}
-                        {targetCoords && (
-                            <Marker
-                                coordinate={targetCoords}
-                                title={targetLocation?.name || 'Prayer Target'}
-                                pinColor="#F59E0B"
-                            />
-                        )}
-                    </MapView>
+                        initialZoom={16}
+                        markers={canShowUserLocation ? liveMapMarkers : liveMapMarkers.filter((marker) => marker.id !== 'current-location')}
+                        polylines={liveMapPolylines}
+                    />
                 </View>
             )}
 

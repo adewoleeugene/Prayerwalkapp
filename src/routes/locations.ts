@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { executeRawQuery, findLocationsNearby, parsePoint } from '../lib/db';
-import { authenticate } from '../middleware/authMiddleware';
+import { deviceAuth } from '../middleware/deviceAuthMiddleware';
 
 const router = Router();
 
 // GET /locations - List all or nearby locations
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { lat, lng, radius, category } = req.query;
 
@@ -78,7 +78,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // GET /locations/:id - Location details
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = req.user!.userId;
