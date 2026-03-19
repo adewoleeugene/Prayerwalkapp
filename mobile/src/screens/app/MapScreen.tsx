@@ -656,15 +656,7 @@ export default function MapScreen() {
                 setActiveWalk(nextActiveWalk);
                 await saveActiveWalkState(nextActiveWalk);
                 fetchWalkHistory();
-                navigation.navigate('Walk', {
-                    session: {
-                        ...session,
-                        id: String(session?.id),
-                        branch: String(session?.branch || branchForStart || 'International'),
-                        participants: parsedParticipants,
-                    },
-                    targetLocation: targetLocation || null,
-                });
+                // Stay on MapScreen — walk tracking happens here
                 if (res.data.queued) {
                     Alert.alert('Offline Start', 'Walk started offline. Data will sync automatically when internet returns.');
                 }
@@ -830,7 +822,7 @@ export default function MapScreen() {
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             title: loc.name,
-            description: `Tap to begin prayer walk${loc.points ? ` • ${loc.points} XP` : ''}`,
+            description: 'Tap to begin prayer walk',
             color: '#16A34A',
         });
     });
@@ -1095,10 +1087,10 @@ export default function MapScreen() {
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.endModalContent}>
-                        <Text style={styles.endModalTitle}>Walk Journey (Optional)</Text>
+                        <Text style={styles.endModalTitle}>Journal (Optional)</Text>
                         <TextInput
                             style={styles.endModalInput}
-                            placeholder="Share your walk journey..."
+                            placeholder="Write about your walk..."
                             placeholderTextColor="#9CA3AF"
                             value={walkJourney}
                             onChangeText={setWalkJourney}
@@ -1113,7 +1105,7 @@ export default function MapScreen() {
                                 onPress={() => completeActiveWalk(false)}
                                 disabled={isEndingWalk}
                             >
-                                <Text style={styles.endModalCloseText}>{isEndingWalk ? 'Ending...' : 'Close'}</Text>
+                                <Text style={styles.endModalCloseText}>{isEndingWalk ? 'Ending...' : 'Skip'}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.endModalButton, styles.endModalSubmitButton]}
