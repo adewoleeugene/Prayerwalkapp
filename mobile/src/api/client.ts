@@ -13,13 +13,20 @@ const client = axios.create({
     },
 });
 
+async function ensureFingerprint(): Promise<string> {
+    let fp = await SecureStore.getItemAsync(DEVICE_FINGERPRINT_KEY);
+    if (!fp) {
+        fp = Math.random().toString(36).substring(7) + Date.now().toString(36);
+        await SecureStore.setItemAsync(DEVICE_FINGERPRINT_KEY, fp);
+    }
+    return fp;
+}
+
 client.interceptors.request.use(async (config) => {
     const headers = config.headers ?? {};
 
-    const fingerprint = await SecureStore.getItemAsync(DEVICE_FINGERPRINT_KEY);
-    if (fingerprint) {
-        (headers as any)['x-device-fingerprint'] = fingerprint;
-    }
+    const fingerprint = await ensureFingerprint();
+    (headers as any)['x-device-fingerprint'] = fingerprint;
 
     config.headers = headers;
     return config;
