@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/db';
 import { executeRawQuery } from '../lib/db';
 import { deviceAuth } from '../middleware/deviceAuthMiddleware';
+import { flexAuth } from '../middleware/flexAuthMiddleware';
 import { validateGPSUpdate } from '../lib/gps';
 import { logger } from '../lib/logger';
 import { DomainError } from '../errors/domainError';
@@ -21,7 +22,7 @@ import { arriveAtLocation, completeWalk, startWalk } from '../services/walks/wal
 const router = Router();
 
 // GET /walks/history - show completed walk paths on map
-router.get('/history', deviceAuth, async (req: Request, res: Response) => {
+router.get('/history', flexAuth, async (req: Request, res: Response) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const hasSearch = q.length >= 2;

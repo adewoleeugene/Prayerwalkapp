@@ -32,6 +32,8 @@ export function useDashboardData() {
         }
       });
       setBranchStats(stats);
+    } catch (err) {
+      console.error('Failed to load branches', err);
     } finally {
       setBranchesLoading(false);
     }
