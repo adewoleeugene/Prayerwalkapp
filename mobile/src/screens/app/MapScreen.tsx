@@ -3,7 +3,7 @@ import { View, StyleSheet, Alert, Dimensions, Text, TouchableOpacity, Modal, Tex
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { LocateFixed, ListOrdered } from 'lucide-react-native';
+import { LocateFixed, ListOrdered, X } from 'lucide-react-native';
 import { api } from '../../api/client';
 import { useWalkTimer } from '../../features/walk/hooks/useWalkTimer';
 import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
@@ -110,6 +110,18 @@ export default function MapScreen() {
     const [currentAddress, setCurrentAddress] = useState('Loading address...');
     const slideAnim = useRef(new Animated.Value(height)).current;
     const hasFocusedHistory = useRef(false);
+    // Walk history sidebar — slides in from the right with this device's walks.
+    const [historySidebarVisible, setHistorySidebarVisible] = useState(false);
+    const sidebarSlideAnim = useRef(new Animated.Value(width)).current;
+    const SIDEBAR_WIDTH = Math.min(width * 0.82, 360);
+    const openHistorySidebar = () => {
+        setHistorySidebarVisible(true);
+        Animated.timing(sidebarSlideAnim, { toValue: 0, duration: 240, useNativeDriver: true }).start();
+    };
+    const closeHistorySidebar = () => {
+        Animated.timing(sidebarSlideAnim, { toValue: SIDEBAR_WIDTH, duration: 200, useNativeDriver: true })
+            .start(() => setHistorySidebarVisible(false));
+    };
 
     // ... rest ...
 
@@ -282,10 +294,12 @@ export default function MapScreen() {
                         if (calculateDistanceMeters(last, nextPoint) < 2) return prev;
                         return [...prev, nextPoint];
                     });
+                    // Pan without forcing zoom — preserves the user's current zoom level
+                    // so the map doesn't visibly jump every GPS update.
                     mapRef.current?.centerOn({
                         latitude: loc.coords.latitude,
                         longitude: loc.coords.longitude,
-                    }, 16);
+                    });
                     void trackWalkOnlineOrQueue({
                         sessionId: activeWalk.sessionId,
                         latitude: loc.coords.latitude,
@@ -815,22 +829,25 @@ export default function MapScreen() {
         }] : []),
     ];
 
-    walkHistory.forEach((walk) => {
-        const point = walk.geometryType === 'path'
-            ? walk.points[walk.points.length - 1]
-            : walk.points[0];
+    // Hide history markers while an active walk is in progress to keep the map focused on the live route.
+    if (!activeWalk) {
+        walkHistory.forEach((walk) => {
+            const point = walk.geometryType === 'path'
+                ? walk.points[walk.points.length - 1]
+                : walk.points[0];
 
-        if (!point) return;
+            if (!point) return;
 
-        mapMarkers.push({
-            id: `history-${walk.sessionId}`,
-            latitude: point.latitude,
-            longitude: point.longitude,
-            title: toHistoryLabel(walk),
-            description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`,
-            color: walk.walkType === 'area' ? '#1C7ED6' : '#E03131',
+            mapMarkers.push({
+                id: `history-${walk.sessionId}`,
+                latitude: point.latitude,
+                longitude: point.longitude,
+                title: toHistoryLabel(walk),
+                description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`,
+                color: walk.walkType === 'area' ? '#1C7ED6' : '#E03131',
+            });
         });
-    });
+    }
 
     locations.forEach((loc) => {
         const coordinate = parseLocationCoordinates(loc.location?.coordinates || loc.location);
@@ -850,10 +867,12 @@ export default function MapScreen() {
         ...(activeWalk && activeRoutePoints.length >= 3 ? [{
             id: 'active-route',
             coordinates: activeRoutePoints,
-            color: 'rgba(37, 99, 235, 0.92)',
-            width: 6,
+            // Vivid green so the live walk is clearly distinct from history blue/red lines.
+            color: 'rgba(16, 185, 129, 0.95)',
+            width: 7,
         }] : []),
-        ...walkHistory
+        // History polylines are hidden while an active walk is in progress so the live route is the only thing on the map.
+        ...(activeWalk ? [] : walkHistory
             .filter((walk) => walk.geometryType === 'path' && walk.points.length >= 3)
             .map((walk) => {
                 const strokeOpacity = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
@@ -867,7 +886,7 @@ export default function MapScreen() {
                     color,
                     width: 7,
                 };
-            }),
+            })),
     ];
 
     const handleMapMarkerPress = (markerId: string) => {
@@ -954,7 +973,7 @@ export default function MapScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={styles.historyButton}
-                    onPress={() => navigation.navigate('HistoryList')}
+                    onPress={openHistorySidebar}
                     accessibilityRole="button"
                     accessibilityLabel="View walk history"
                 >
@@ -963,11 +982,6 @@ export default function MapScreen() {
 
                 {!activeWalk && (
                     <>
-                        {shouldShowSyncStatusText && (
-                            <View style={styles.bottomSyncBannerWrap}>
-                                <Text style={styles.bottomSyncStatusText}>{syncStatusText}</Text>
-                            </View>
-                        )}
                         <TouchableOpacity
                             style={styles.fabStartButton}
                             onPress={() => openStartDrawer()}
@@ -1145,6 +1159,81 @@ export default function MapScreen() {
                     </View>
                 </View>
             </Modal>
+
+            {/* Walk History Sidebar — slides in from the right, shows this device's walks */}
+            {historySidebarVisible && (
+                <>
+                    <TouchableWithoutFeedback onPress={closeHistorySidebar}>
+                        <View style={styles.sidebarBackdrop} />
+                    </TouchableWithoutFeedback>
+                    <Animated.View
+                        style={[
+                            styles.sidebarContainer,
+                            { width: SIDEBAR_WIDTH, transform: [{ translateX: sidebarSlideAnim }] },
+                        ]}
+                    >
+                        <View style={styles.sidebarHeader}>
+                            <View>
+                                <Text style={styles.sidebarTitle}>Your Walks</Text>
+                                <Text style={styles.sidebarSubtitle}>
+                                    {walkHistory.length} {walkHistory.length === 1 ? 'walk' : 'walks'} on this device
+                                </Text>
+                            </View>
+                            <TouchableOpacity onPress={closeHistorySidebar} style={styles.sidebarCloseButton}>
+                                <X size={22} color="#374151" strokeWidth={2.25} />
+                            </TouchableOpacity>
+                        </View>
+                        {walkHistory.length === 0 ? (
+                            <View style={styles.sidebarEmpty}>
+                                <Text style={styles.sidebarEmptyText}>No walks yet. Start your first one!</Text>
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={[...walkHistory].sort((a, b) =>
+                                    new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+                                )}
+                                keyExtractor={(item) => item.sessionId}
+                                contentContainerStyle={styles.sidebarListContent}
+                                renderItem={({ item }) => (
+                                    <TouchableOpacity
+                                        style={styles.sidebarItem}
+                                        onPress={() => {
+                                            setSelectedHistoryWalk(item);
+                                            setHistorySheetVisible(true);
+                                            closeHistorySidebar();
+                                        }}
+                                    >
+                                        <View style={styles.sidebarItemHeaderRow}>
+                                            <Text style={styles.sidebarItemTitle} numberOfLines={1}>
+                                                {toHistoryLabel(item)}
+                                            </Text>
+                                            <View style={[
+                                                styles.sidebarItemBadge,
+                                                item.status === 'active' && styles.sidebarItemBadgeActive,
+                                            ]}>
+                                                <Text style={[
+                                                    styles.sidebarItemBadgeText,
+                                                    item.status === 'active' && styles.sidebarItemBadgeTextActive,
+                                                ]}>
+                                                    {item.status === 'active' ? 'Active' : item.walkType === 'area' ? 'Area' : 'Path'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.sidebarItemDate}>
+                                            {new Date(item.startedAt).toLocaleString(undefined, {
+                                                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                                            })}
+                                        </Text>
+                                        <Text style={styles.sidebarItemMeta}>
+                                            {toDurationLabel(item.durationSeconds)} • {toDistanceLabel(item.distanceMeters)} • {item.branch}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                            />
+                        )}
+                    </Animated.View>
+                </>
+            )}
 
             {/* History Details Bottom Sheet */}
             {historySheetVisible && selectedHistoryWalk && (
@@ -1674,5 +1763,113 @@ const styles = StyleSheet.create({
     historyCloseText: {
         color: '#FFFFFF',
         fontWeight: '700',
+    },
+    sidebarBackdrop: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.42)',
+        zIndex: 60,
+    },
+    sidebarContainer: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#FFFFFF',
+        zIndex: 61,
+        shadowColor: '#000',
+        shadowOffset: { width: -2, height: 0 },
+        shadowOpacity: 0.18,
+        shadowRadius: 12,
+        elevation: 16,
+        paddingTop: Platform.OS === 'ios' ? 56 : 28,
+    },
+    sidebarHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 18,
+        paddingBottom: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+    },
+    sidebarTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    sidebarSubtitle: {
+        fontSize: 12,
+        color: '#6B7280',
+        marginTop: 2,
+    },
+    sidebarCloseButton: {
+        padding: 6,
+        borderRadius: 999,
+        backgroundColor: '#F3F4F6',
+    },
+    sidebarEmpty: {
+        padding: 32,
+        alignItems: 'center',
+    },
+    sidebarEmptyText: {
+        color: '#6B7280',
+        fontSize: 14,
+        textAlign: 'center',
+    },
+    sidebarListContent: {
+        paddingHorizontal: 14,
+        paddingTop: 12,
+        paddingBottom: 24,
+    },
+    sidebarItem: {
+        padding: 14,
+        borderRadius: 12,
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginBottom: 10,
+    },
+    sidebarItemHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    sidebarItemTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111827',
+        flex: 1,
+        marginRight: 8,
+    },
+    sidebarItemBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 999,
+        backgroundColor: '#E5E7EB',
+    },
+    sidebarItemBadgeText: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: '#374151',
+    },
+    sidebarItemBadgeActive: {
+        backgroundColor: '#D1FAE5',
+    },
+    sidebarItemBadgeTextActive: {
+        color: '#065F46',
+    },
+    sidebarItemDate: {
+        fontSize: 12,
+        color: '#6B7280',
+        marginBottom: 2,
+    },
+    sidebarItemMeta: {
+        fontSize: 12,
+        color: '#374151',
     },
 });

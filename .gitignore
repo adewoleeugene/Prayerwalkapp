@@ -25,3 +25,4 @@ mobile/ios/Pods
 mobile/android/app/build
 mobile/android/.gradle
 .vercel
+.env*.local

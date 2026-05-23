@@ -15,13 +15,8 @@ function createLocalSessionId() {
   return `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function isOfflineLikeError(error: unknown): boolean {
-  const axiosError = error as AxiosError;
-  if (!axiosError) return false;
-  if (!axiosError.response) return true;
-  const status = Number(axiosError.response.status || 0);
-  if (status >= 500) return true;
-  return false;
+function isOfflineLikeError(_error: unknown): boolean {
+  return false; // v1: disable offline queue — failures surface as visible errors
 }
 
 function localWithinRange(targetLocation: any, latitude: number, longitude: number): { withinRange: boolean; distance: number } {

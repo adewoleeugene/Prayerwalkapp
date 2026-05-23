@@ -1,6 +1,6 @@
 import { NativeModules } from 'react-native';
 
-const DEFAULT_API_PORT = '3001';
+const DEFAULT_API_PORT = '3000';
 const PROD_API_BASE_URL = 'https://prayerwalkapp.vercel.app';
 
 function isTunnelHost(hostname: string): boolean {
@@ -48,7 +48,13 @@ export function resolveApiBaseUrl() {
     try {
       const metroHost = new URL(scriptURL).hostname;
       if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1' && !isTunnelHost(metroHost)) {
+        // Same LAN — Metro host is the dev machine's local IP
         return `http://${metroHost}:${DEFAULT_API_PORT}`;
+      }
+      // Expo tunnel: Metro is on exp.direct but Next.js is still on the dev machine.
+      // Use the env-configured local IP if set, otherwise fall back to Vercel.
+      if (isTunnelHost(metroHost)) {
+        return PROD_API_BASE_URL;
       }
     } catch {
       // Ignore parsing errors and continue.

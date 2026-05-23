@@ -459,7 +459,7 @@ export default function DashboardContent() {
                             {[
                                 { label: 'Branches', value: branches.length, icon: <Building2 className="h-3.5 w-3.5" /> },
                                 { label: 'Walks', value: totalWalks, icon: <Activity className="h-3.5 w-3.5" /> },
-                                { label: 'km', value: totalDistKm.toFixed(0), icon: <Navigation className="h-3.5 w-3.5" /> },
+                                { label: 'km', value: totalDistKm.toFixed(1), icon: <Navigation className="h-3.5 w-3.5" /> },
                             ].map(({ label, value, icon }) => (
                                 <div key={label} className="p-3 text-center">
                                     <div className="flex items-center justify-center gap-1 text-muted-foreground/60 text-[10px] font-black uppercase mb-1">{icon}{label}</div>

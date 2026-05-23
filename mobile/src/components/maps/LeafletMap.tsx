@@ -241,10 +241,15 @@ export const LeafletMap = forwardRef<LeafletMapHandle, LeafletMapProps>(function
         runScript(`window.__leafletBridge && window.__leafletBridge.update(${JSON.stringify(payload)});`);
     }, [payload, isReady]);
 
+    // Apply initial center/zoom only once when the map first becomes ready.
+    // Re-running this on every prop change would yank the camera back on every
+    // location update during an active walk, fighting the imperative centerOn calls.
+    const hasAppliedInitialView = useRef(false);
     useEffect(() => {
-        if (!isReady) return;
+        if (!isReady || hasAppliedInitialView.current) return;
+        hasAppliedInitialView.current = true;
         runScript(`window.__leafletBridge && window.__leafletBridge.centerOn(${JSON.stringify(initialCenter)}, ${initialZoom});`);
-    }, [initialCenter, initialZoom, isReady]);
+    }, [isReady, initialCenter, initialZoom]);
 
     return (
         <View style={[styles.container, style]}>

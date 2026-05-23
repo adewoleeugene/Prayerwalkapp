@@ -6,6 +6,15 @@ export async function fetchBranches(): Promise<BranchSummary[]> {
   return res.branches || [];
 }
 
+/** Fetch every walk at once — admin only. Used to build branch stats in one round-trip. */
+export async function fetchAllWalks(): Promise<WalkHistoryRoute[]> {
+  const res = await client.get<{ routes: WalkHistoryRoute[] }>(
+    '/walks/history?allTime=true&limit=5000&walkType=all&includeActive=true'
+  );
+  return res.routes || [];
+}
+
+/** Still used for the branch drilldown view (keeps per-branch time-filter support). */
 export async function fetchBranchWalks(branchSlug: string, days = 30): Promise<WalkHistoryRoute[]> {
   const params = new URLSearchParams({
     branch: branchSlug,

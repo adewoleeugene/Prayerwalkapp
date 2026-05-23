@@ -366,15 +366,6 @@ export default function WalkScreen({ route }: { route: any }) {
 
     return (
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-            <View style={{ marginBottom: 12 }}>
-                <SyncBanner
-                    status={syncStatus}
-                    onRetry={() => {
-                        void triggerOfflineSync('manual');
-                    }}
-                />
-            </View>
-
             {/* Header Area */}
             <View style={styles.headerContainer}>
                 <Text style={styles.title}>{targetLocation?.name || 'Open Prayer Walk'}</Text>
