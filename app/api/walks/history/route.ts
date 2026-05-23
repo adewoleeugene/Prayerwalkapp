@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
       include: {
         location: { select: { id: true, name: true, prayerText: true, category: true, points: true } },
         flags: true,
-        gpsEvents: { orderBy: { timestamp: 'asc' }, select: { location: true, timestamp: true } },
+        gpsEvents: { orderBy: { eventAt: 'asc' }, select: { location: true, timestamp: true } },
       },
     });
 
