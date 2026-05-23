@@ -1,0 +1,122 @@
+import { PrismaClient } from '@prisma/client';
+
+const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const runtimeDatabaseUrl =
+  process.env.NODE_ENV === 'test'
+    ? (testDatabaseUrl || databaseUrl)
+    : databaseUrl;
+
+export const prisma =
+  globalForPrisma.prisma ||
+  new PrismaClient({
+    ...(runtimeDatabaseUrl
+      ? { datasources: { db: { url: runtimeDatabaseUrl } } }
+      : {}),
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+export async function executeRawQuery<T = any>(
+  query: string,
+  params: any[] = []
+): Promise<T> {
+  return prisma.$queryRawUnsafe<T>(query, ...params);
+}
+
+export const executePostGISQuery = executeRawQuery;
+
+export function createPoint(latitude: number, longitude: number): string {
+  return JSON.stringify({ type: 'Point', coordinates: [longitude, latitude] });
+}
+
+export function parsePoint(pointStr: string): { latitude: number; longitude: number } | null {
+  try {
+    const point = JSON.parse(pointStr);
+    return { latitude: point.coordinates[1], longitude: point.coordinates[0] };
+  } catch {
+    return null;
+  }
+}
+
+export function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+export async function findLocationsNearby(
+  latitude: number,
+  longitude: number,
+  radiusMeters: number
+) {
+  const locationGeomExpr = `
+    CASE
+      WHEN left(trim(location::text), 1) = '{'
+        THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+      ELSE location::geometry
+    END
+  `;
+  return executeRawQuery(`
+    SELECT
+      id, name, description,
+      ST_AsGeoJSON(${locationGeomExpr}) as location,
+      address, prayer_text, category, difficulty, points, radius_meters,
+      ST_Distance(
+        ${locationGeomExpr}::geography,
+        ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
+      ) as distance_meters
+    FROM prayer_locations
+    WHERE is_active = true
+    AND ST_DWithin(
+      ${locationGeomExpr}::geography,
+      ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
+      $3
+    )
+    ORDER BY distance_meters
+  `, [latitude, longitude, radiusMeters]);
+}
+
+export async function isWithinRange(
+  userLat: number,
+  userLng: number,
+  locationId: string
+): Promise<{ withinRange: boolean; distance: number; requiredRadius: number }> {
+  const locationGeomExpr = `
+    CASE
+      WHEN left(trim(location::text), 1) = '{'
+        THEN ST_SetSRID(ST_GeomFromGeoJSON(location::text), 4326)
+      ELSE location::geometry
+    END
+  `;
+  const result = await executeRawQuery<any[]>(`
+    SELECT
+      ST_Distance(
+        ${locationGeomExpr}::geography,
+        ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
+      ) as distance,
+      radius_meters
+    FROM prayer_locations WHERE id = $3
+  `, [userLat, userLng, locationId]);
+
+  if (!result[0]) return { withinRange: false, distance: 0, requiredRadius: 0 };
+  const distance = parseFloat(result[0].distance);
+  const requiredRadius = parseFloat(result[0].radius_meters);
+  return { withinRange: distance <= requiredRadius, distance, requiredRadius };
+}
+
+export default prisma;
