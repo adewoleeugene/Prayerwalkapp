@@ -166,7 +166,7 @@ export default function WalkScreen({ route }: { route: any }) {
 
         const sub = await Location.watchPositionAsync(
             {
-                accuracy: Location.Accuracy.Balanced,
+                accuracy: Location.Accuracy.High,
                 timeInterval: 2000,
                 distanceInterval: 3,
             },

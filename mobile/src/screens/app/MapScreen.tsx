@@ -256,7 +256,7 @@ export default function MapScreen() {
             stopTracking();
             const sub = await Location.watchPositionAsync(
                 {
-                    accuracy: Location.Accuracy.Balanced,
+                    accuracy: Location.Accuracy.High,
                     timeInterval: 2000,
                     distanceInterval: 3,
                 },
@@ -616,7 +616,7 @@ export default function MapScreen() {
             // Capture a fresh start point/address at button press time.
             try {
                 const latestLocation = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.Balanced,
+                    accuracy: Location.Accuracy.High,
                 });
                 startLatitude = latestLocation.coords.latitude;
                 startLongitude = latestLocation.coords.longitude;
@@ -734,7 +734,7 @@ export default function MapScreen() {
         try {
             const shouldWaitForGpsFix = latitude === undefined || longitude === undefined;
             const liveLoc = await Promise.race([
-                Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+                Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
                 new Promise<null>((resolve) => setTimeout(() => resolve(null), shouldWaitForGpsFix ? 5000 : 1200)),
             ]);
             if (liveLoc) {

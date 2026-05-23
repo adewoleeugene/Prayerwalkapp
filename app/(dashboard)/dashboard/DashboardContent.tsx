@@ -71,8 +71,12 @@ function getWalkTrackPoints(walk: any): Array<{ lat: number; lng: number }> {
     const parsedPoints = rawPoints
         .map((p: any) => toLatLng(p))
         .filter((p: { lat: number; lng: number } | null): p is { lat: number; lng: number } => !!p);
-    // Require 3+ points for a real path — 2 points would just draw a straight line
-    return parsedPoints.length >= 3 && hasMovement(parsedPoints) ? parsedPoints : [];
+    // routeQuality='low' means the API fell back to [startLocation, currentLocation] (no real GPS events).
+    // For those, require 3+ so we never draw a misleading straight line from two non-GPS points.
+    // For real GPS data (high/medium), 2 points is enough to draw a meaningful path segment.
+    const isRealGps = walk?.routeQuality && walk.routeQuality !== 'low';
+    const minPoints = isRealGps ? 2 : 3;
+    return parsedPoints.length >= minPoints && hasMovement(parsedPoints) ? parsedPoints : [];
 }
 
 function getWalkIdentity(walk: any): string {
