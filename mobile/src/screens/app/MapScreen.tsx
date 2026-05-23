@@ -9,7 +9,11 @@ import { useWalkTimer } from '../../features/walk/hooks/useWalkTimer';
 import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
 import { clearActiveWalkState, loadActiveWalkState, saveActiveWalkState } from '../../features/walk/storage/activeWalkStorage';
 import { ActiveWalkDrawer } from '../../features/walk/components/ActiveWalkDrawer';
-import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import { ensureForegroundLocationAccess, ensureBackgroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import {
+    startBackgroundLocationTracking,
+    stopBackgroundLocationTracking,
+} from '../../features/location/backgroundLocationTask';
 import {
     completeWalkOnlineOrQueue,
     startWalkOnlineOrQueue,
@@ -243,6 +247,14 @@ export default function MapScreen() {
             }
             setCanShowUserLocation(true);
 
+            // Request background permission and start background tracking.
+            // Non-blocking — a denial skips background updates without stopping the walk.
+            void ensureBackgroundLocationAccess().then((bgAccess) => {
+                if (bgAccess.ok) {
+                    void startBackgroundLocationTracking(activeWalk.sessionId);
+                }
+            });
+
             if (location?.coords) {
                 setActiveRoutePoints([{ latitude: location.coords.latitude, longitude: location.coords.longitude }]);
                 mapRef.current?.centerOn({
@@ -299,6 +311,8 @@ export default function MapScreen() {
         return () => {
             cancelled = true;
             stopTracking();
+            // Stop background tracking when the walk ends or the component unmounts
+            void stopBackgroundLocationTracking();
         };
     }, [activeWalk]);
 
@@ -766,6 +780,7 @@ export default function MapScreen() {
                 locationSubscription.current.remove();
                 locationSubscription.current = null;
             }
+            void stopBackgroundLocationTracking();
             setActiveRoutePoints([]);
             setActiveWalk(null);
             setStoppedElapsedSeconds(null);

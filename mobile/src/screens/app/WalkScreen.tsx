@@ -7,7 +7,11 @@ import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '
 import { WalkLiveStatsRow } from '../../features/walk/components/WalkLiveStatsRow';
 import { TeamMembersCard } from '../../features/walk/components/TeamMembersCard';
 import { WalkSummaryStatsGrid } from '../../features/walk/components/WalkSummaryStatsGrid';
-import { ensureForegroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import { ensureForegroundLocationAccess, ensureBackgroundLocationAccess } from '../../features/location/ensureForegroundLocation';
+import {
+    startBackgroundLocationTracking,
+    stopBackgroundLocationTracking,
+} from '../../features/location/backgroundLocationTask';
 import { SyncBanner } from '../../features/walk/components/SyncBanner';
 import {
     arriveOnlineOrQueue,
@@ -119,6 +123,7 @@ export default function WalkScreen({ route }: { route: any }) {
 
         return () => {
             if (locationSubscription.current) locationSubscription.current.remove();
+            void stopBackgroundLocationTracking();
         };
     }, []);
 
@@ -163,6 +168,15 @@ export default function WalkScreen({ route }: { route: any }) {
             return;
         }
         setCanShowUserLocation(true);
+
+        // Request background permission and start background tracking.
+        // Runs silently — a denial only means we skip background updates,
+        // not that we block the whole walk.
+        void ensureBackgroundLocationAccess().then((bgAccess) => {
+            if (bgAccess.ok) {
+                void startBackgroundLocationTracking(session.id);
+            }
+        });
 
         const sub = await Location.watchPositionAsync(
             {
@@ -261,6 +275,7 @@ export default function WalkScreen({ route }: { route: any }) {
 
             if (res.data.success) {
                 if (locationSubscription.current) locationSubscription.current.remove();
+                void stopBackgroundLocationTracking();
                 setWalkSummary({
                     pointsEarned: Number(res.data.pointsEarned || 0),
                     durationSeconds: elapsedSecondsRef.current,
