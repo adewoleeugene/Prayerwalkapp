@@ -1,9 +1,9 @@
 import client from '@/lib/apiClient';
-import type { BranchSummary, WalkHistoryRoute } from '../types';
+import type { BranchSummary, WalkHistoryRoute } from '../types/index';
 
 export async function fetchBranches(): Promise<BranchSummary[]> {
-  const res = await client.get('/admin/branches');
-  return res.data.branches || [];
+  const res = await client.get<{ branches: BranchSummary[] }>('/admin/branches');
+  return res.branches || [];
 }
 
 export async function fetchBranchWalks(branchSlug: string, days = 30): Promise<WalkHistoryRoute[]> {
@@ -15,6 +15,6 @@ export async function fetchBranchWalks(branchSlug: string, days = 30): Promise<W
     includeActive: 'true',
     days: String(days),
   });
-  const res = await client.get(`/walks/history?${params.toString()}`);
-  return res.data.routes || [];
+  const res = await client.get<{ routes: WalkHistoryRoute[] }>(`/walks/history?${params.toString()}`);
+  return res.routes || [];
 }

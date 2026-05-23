@@ -51,7 +51,7 @@ function InviteModal({ branches, onClose, onSuccess }: {
         setLoading(true);
         try {
             const res = await inviteAdmin({ email, pastorName, branch });
-            setResult({ inviteLink: res.data.inviteLink, warning: res.data.warning });
+            setResult({ inviteLink: res.inviteLink, warning: res.warning });
             onSuccess();
         } catch (e: any) {
             setResult({ error: e?.response?.data?.error || 'Failed to send invite' });

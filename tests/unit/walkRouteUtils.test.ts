@@ -4,7 +4,7 @@ import {
   cleanRoutePoints,
   parseCoordinateSearchTerm,
   parseParticipants,
-} from '../../src/services/walks/routeUtils';
+} from '@/services/walks/routeUtils';
 
 describe('walk route utils', () => {
   it('parses participants from json and csv', () => {

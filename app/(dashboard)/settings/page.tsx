@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -129,8 +129,10 @@ export default function SettingsPage() {
         router.push('/login');
     };
 
-    const role = localStorage.getItem('adminUserRole');
-    const isSuperadmin = role === 'superadmin';
+    const [isSuperadmin, setIsSuperadmin] = useState(false);
+    useEffect(() => {
+        setIsSuperadmin(localStorage.getItem('adminUserRole') === 'superadmin');
+    }, []);
 
     const handleUpdateName = async () => {
         const trimmed = nameValue.trim();

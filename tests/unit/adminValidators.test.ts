@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { slugify } from '../../src/validators/admin';
+import { slugify } from '@/validators/admin';
 
 describe('admin validators', () => {
   it('slugifies branch names', () => {

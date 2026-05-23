@@ -1,4 +1,4 @@
-import { calculateDistance } from @/lib/db';
+import { calculateDistance } from '@/lib/db';
 
 export type LatLng = { latitude: number; longitude: number };
 

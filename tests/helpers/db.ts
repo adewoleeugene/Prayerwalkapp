@@ -3,9 +3,8 @@
  * All helpers prefix data with a unique test-run ID so we can
  * wipe only our own rows without touching real data.
  */
-import { prisma, executeRawQuery } from '../../src/lib/db';
-import { hashPassword } from '../../src/lib/auth';
-import { generateToken } from '../../src/lib/auth';
+import { prisma, executeRawQuery } from '@/lib/db';
+import { hashPassword, generateToken } from '@/lib/auth';
 
 function assertTestDbConfigured() {
     const configured = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';

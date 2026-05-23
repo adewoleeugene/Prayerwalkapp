@@ -1,17 +1,17 @@
 import client from '@/lib/apiClient';
-import type { AdminUser, Branch } from '../types';
+import type { AdminUser, Branch } from '../types/index';
 
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
-  const res = await client.get('/admin/admin-users');
-  return res.data.admins || [];
+  const res = await client.get<{ admins: AdminUser[] }>('/admin/admin-users');
+  return res.admins || [];
 }
 
 export async function fetchBranches(): Promise<Branch[]> {
-  const res = await client.get('/admin/branches');
-  return res.data.branches || [];
+  const res = await client.get<{ branches: Branch[] }>('/admin/branches');
+  return res.branches || [];
 }
 
-export async function inviteAdmin(payload: { email: string; pastorName: string; branch: string }) {
+export async function inviteAdmin(payload: { email: string; pastorName: string; branch: string }): Promise<{ inviteLink?: string; warning?: string }> {
   return client.post('/admin/admin-invites', payload);
 }
 

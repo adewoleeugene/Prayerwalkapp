@@ -18,7 +18,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(path, { ...options, headers });
+  const fullPath = `/api${path.startsWith('/') ? path : `/${path}`}`;
+  const res = await fetch(fullPath, { ...options, headers });
 
   if (res.status === 401) {
     handleUnauthorized();

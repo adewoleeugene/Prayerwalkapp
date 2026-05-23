@@ -1,15 +1,15 @@
 import client from '@/lib/apiClient';
-import type { AdminProfile } from '../types';
+import type { AdminProfile } from '../types/index';
 
 export async function fetchProfile(): Promise<AdminProfile> {
-  const res = await client.get('/admin/me');
-  return res.data.profile;
+  const res = await client.get<{ profile: AdminProfile }>('/admin');
+  return res.profile;
 }
 
 export async function updateName(name: string) {
-  return client.patch('/admin/me', { name });
+  return client.patch('/admin', { name });
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {
-  return client.post('/admin/change-password', { currentPassword, newPassword });
+  return client.post('/admin', { currentPassword, newPassword });
 }
