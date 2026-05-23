@@ -60,7 +60,6 @@ app.use(
 );
 app.use(morgan('dev'));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static('public'));
 
 // Rate limiters
 const authLimiter = rateLimit({
@@ -79,40 +78,12 @@ const signupLimiter = rateLimit({
   message: { error: 'Too many signup attempts. Please try again later.' },
 });
 
-// Root route
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Welcome to Charis Prayer Walk API',
-    version: '1.0.0',
-    endpoints: {
-      auth: '/auth',
-      locations: '/locations',
-      walks: '/walks',
-      users: '/users',
-    }
-  });
-});
-
 // Routes
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 app.use((req, res, next) => {
   logger.info('request_diag', { method: req.method, url: req.url, path: req.path });
   next();
-});
-
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public', 'admin-login.html'));
-});
-
-// New React Dashboard (Shadcn)
-app.use('/v2', express.static(path.join(process.cwd(), 'public', 'dashboard')));
-app.get('/v2/*', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public', 'dashboard', 'index.html'));
-});
-
-app.get('/superadmin', (req, res) => {
-  res.redirect('/admin');
 });
 
 // Apply rate limiting to auth routes
@@ -131,6 +102,12 @@ app.use('/admin', adminRoutes);
 app.use('/search', searchRoutes);
 
 app.use(errorHandler);
+
+// Admin dashboard SPA — served at / after all API routes
+app.use(express.static(path.join(process.cwd(), 'public', 'dashboard')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard', 'index.html'));
+});
 
 const PORT = process.env.PORT || 3001;
 
