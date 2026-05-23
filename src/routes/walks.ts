@@ -501,8 +501,7 @@ router.post('/track', deviceAuth, async (req: Request, res: Response) => {
       });
     } catch (err) {
       logger.error('Failed to validate GPS for session', err, { sessionId });
-      // Still return 200 so the app doesn't crash on failed validation logs
-      res.json({ success: false, error: 'Validation failed', acceptedAt: new Date().toISOString(), idempotentReplay: false });
+      res.status(500).json({ success: false, error: 'Tracking failed' });
     }
   } catch (error) {
     logger.error('Track error:', error);

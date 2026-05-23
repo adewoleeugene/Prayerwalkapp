@@ -2,8 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, StyleSheet, Alert, Dimensions, Text, TouchableOpacity, Modal, TextInput, Platform, Keyboard, TouchableWithoutFeedback, Animated, ScrollView, FlatList } from 'react-native';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { LocateFixed } from 'lucide-react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { LocateFixed, ListOrdered } from 'lucide-react-native';
 import { api } from '../../api/client';
 import { useWalkTimer } from '../../features/walk/hooks/useWalkTimer';
 import { calculateDistanceMeters, formatDuration, parseParticipantsLike } from '../../features/walk/utils/geo';
@@ -86,6 +86,7 @@ function parseLocationCoordinates(raw: any): { latitude: number; longitude: numb
 
 export default function MapScreen() {
     const navigation = useNavigation<any>();
+    const route = useRoute<any>();
     const mapRef = useRef<LeafletMapHandle | null>(null);
     const locationSubscription = useRef<Location.LocationSubscription | null>(null);
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -188,6 +189,16 @@ export default function MapScreen() {
         const unsubscribe = subscribeSyncStatus(setSyncStatus);
         return unsubscribe;
     }, []);
+
+    // When returning from LocationDetailScreen with a chosen location, open the drawer
+    useEffect(() => {
+        const incoming = route.params?.startLocation;
+        if (incoming) {
+            setTargetLocation(incoming);
+            setDrawerVisible(true);
+            navigation.setParams({ startLocation: undefined });
+        }
+    }, [route.params?.startLocation]);
 
     // Open/Close Drawer Animation
     useEffect(() => {
@@ -849,7 +860,7 @@ export default function MapScreen() {
             const locationId = markerId.replace('location-', '');
             const nextLocation = locations.find((loc) => String(loc.id) === locationId);
             if (nextLocation) {
-                openStartDrawer(nextLocation);
+                navigation.navigate('LocationDetail', { location: nextLocation });
             }
             return;
         }
@@ -925,6 +936,14 @@ export default function MapScreen() {
                     accessibilityLabel="Recenter map to my location"
                 >
                     <LocateFixed size={22} color="#3B82F6" strokeWidth={2.25} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.historyButton}
+                    onPress={() => navigation.navigate('HistoryList')}
+                    accessibilityRole="button"
+                    accessibilityLabel="View walk history"
+                >
+                    <ListOrdered size={20} color="#374151" strokeWidth={2.25} />
                 </TouchableOpacity>
 
                 {!activeWalk && (
@@ -1221,6 +1240,24 @@ const styles = StyleSheet.create({
         bottom: 40,
         height: 120,
         justifyContent: 'flex-end',
+    },
+    historyButton: {
+        position: 'absolute',
+        right: 52,
+        top: 0,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.22,
+        shadowRadius: 4,
     },
     recenterButton: {
         position: 'absolute',
