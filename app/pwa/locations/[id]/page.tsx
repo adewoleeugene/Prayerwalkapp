@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, MapPin, Navigation, Star } from 'lucide-react';
@@ -8,20 +8,21 @@ import { pwaApi } from '@/lib/pwa/apiClient';
 
 type Location = Record<string, unknown>;
 
-export default function LocationDetailPage({ params }: { params: { id: string } }) {
+export default function LocationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [location, setLocation] = useState<Location | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    pwaApi.locations.get(params.id)
+    pwaApi.locations.get(id)
       .then((res) => {
         const data = res.data as Record<string, unknown>;
         setLocation((data.location ?? data) as Location);
       })
       .catch(() => setLocation(null))
       .finally(() => setLoading(false));
-  }, [params.id]);
+  }, [id]);
 
   if (loading) {
     return (
@@ -114,7 +115,7 @@ export default function LocationDetailPage({ params }: { params: { id: string } 
       {/* Footer CTA */}
       <div className="absolute inset-x-0 bottom-0 bg-white border-t border-slate-200 p-4 pb-6">
         <Link
-          href={`/pwa/map?locationId=${params.id}`}
+          href={`/pwa/map?locationId=${id}`}
           className="block w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white font-bold text-center rounded-2xl transition-colors shadow-md"
         >
           Start Prayer Walk Here
