@@ -525,7 +525,7 @@ export default function MapPage() {
     historyToShow.forEach((walk) => {
       const pt = walk.geometryType === 'path' ? walk.points[walk.points.length - 1] : walk.points[0];
       if (!pt) return;
-      mapMarkers.push({ id: `history-${walk.sessionId}`, latitude: pt.latitude, longitude: pt.longitude, title: toHistoryLabel(walk), description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`, color: walk.walkType === 'area' ? '#1C7ED6' : '#E03131' });
+      mapMarkers.push({ id: `history-${walk.sessionId}`, latitude: pt.latitude, longitude: pt.longitude, title: toHistoryLabel(walk), description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`, color: '#1C7ED6' });
     });
   }
   // Hide location pins when a specific walk is in focus
@@ -547,7 +547,7 @@ export default function MapPage() {
       : walkHistory;
     historyToShow.filter((w) => w.geometryType === 'path' && w.points.length >= 3).forEach((walk) => {
       const o = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
-      mapPolylines.push({ id: `history-line-${walk.sessionId}`, coordinates: walk.points, color: walk.walkType === 'area' ? `rgba(38,132,255,${o})` : `rgba(255,59,48,${o})`, width: 7 });
+      mapPolylines.push({ id: `history-line-${walk.sessionId}`, coordinates: walk.points, color: `rgba(234, 179, 8, ${o})`, width: 7 });
     });
   }
 
