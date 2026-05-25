@@ -673,15 +673,21 @@ export default function MapPage() {
               {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
             <div className="px-5 pb-8 space-y-4">
-              {/* Branch row */}
+              {/* Branch row — tap only available when multiple branches exist */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <span className="text-sm font-bold text-slate-600">Branch</span>
-                <button
-                  onClick={() => setBranchPickerOpen(true)}
-                  className="text-sm text-slate-800 font-medium"
-                >
-                  {startBranch || 'Select Branch'} ›
-                </button>
+                {sortedBranches.length > 1 ? (
+                  <button
+                    onClick={() => setBranchPickerOpen(true)}
+                    className="text-sm text-indigo-600 font-semibold"
+                  >
+                    {startBranch || 'Select Branch'} ›
+                  </button>
+                ) : (
+                  <span className="text-sm text-slate-800 font-medium">
+                    {startBranch || 'Loading…'}
+                  </span>
+                )}
               </div>
               {/* Location row */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
