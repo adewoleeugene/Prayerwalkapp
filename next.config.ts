@@ -1,4 +1,54 @@
 import type { NextConfig } from 'next';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const withPWA = require('next-pwa')({
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development',
+  runtimeCaching: [
+    // OpenStreetMap tiles — stale-while-revalidate, cached for 7 days
+    {
+      urlPattern: /^https:\/\/[a-c]\.tile\.openstreetmap\.org\/.*/i,
+      handler: 'StaleWhileRevalidate',
+      options: {
+        cacheName: 'osm-tiles',
+        expiration: { maxEntries: 1000, maxAgeSeconds: 7 * 24 * 60 * 60 },
+        cacheableResponse: { statuses: [0, 200] },
+      },
+    },
+    // API routes — network-first so fresh data wins; falls back to cache
+    {
+      urlPattern: /^\/api\/.*/i,
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'api-cache',
+        networkTimeoutSeconds: 10,
+        expiration: { maxEntries: 64, maxAgeSeconds: 24 * 60 * 60 },
+        cacheableResponse: { statuses: [0, 200] },
+      },
+    },
+    // Next.js static assets — cache-first, long TTL (content-hashed filenames)
+    {
+      urlPattern: /\/_next\/static\/.*/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'next-static',
+        expiration: { maxEntries: 200, maxAgeSeconds: 365 * 24 * 60 * 60 },
+        cacheableResponse: { statuses: [0, 200] },
+      },
+    },
+    // Images and icons — cache-first, 30 days
+    {
+      urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'images',
+        expiration: { maxEntries: 128, maxAgeSeconds: 30 * 24 * 60 * 60 },
+        cacheableResponse: { statuses: [0, 200] },
+      },
+    },
+  ],
+});
 
 function corsHeaders(origin: string) {
   return [
@@ -56,4 +106,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withPWA(nextConfig);
