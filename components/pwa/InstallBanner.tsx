@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Download, Share2, X } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 
 // Chrome/Edge fire this before showing their mini-bar. Not in TypeScript's lib yet.
 interface BeforeInstallPromptEvent extends Event {
@@ -13,7 +13,6 @@ interface BeforeInstallPromptEvent extends Event {
 type State =
   | { kind: 'idle' }
   | { kind: 'android'; deferred: BeforeInstallPromptEvent }
-  | { kind: 'ios' }
   | { kind: 'done' };
 
 const DISMISSED_KEY = 'pwa_install_dismissed_until';
@@ -45,15 +44,10 @@ export function InstallBanner() {
       (navigator as any).standalone === true;
     if (isStandalone || isDismissed()) { setState({ kind: 'done' }); return; }
 
-    // iOS Safari — no beforeinstallprompt, show manual Share instructions
+    // iOS Safari — no beforeinstallprompt and no banner needed
     const ua = navigator.userAgent;
     const isIOS = /iphone|ipad|ipod/i.test(ua);
-    const isSafari = /safari/i.test(ua) && !/chrome|chromium|crios|fxios/i.test(ua);
-    if (isIOS && isSafari && !shown.current) {
-      shown.current = true;
-      const t = setTimeout(() => setState({ kind: 'ios' }), 3000);
-      return () => clearTimeout(t);
-    }
+    if (isIOS) { setState({ kind: 'done' }); return; }
 
     // Android / Chrome / Edge — capture the deferred prompt
     const handler = (e: Event) => {
@@ -85,40 +79,6 @@ export function InstallBanner() {
   }
 
   if (state.kind === 'idle' || state.kind === 'done') return null;
-
-  // ── iOS — Share → Add to Home Screen ────────────────────────────────────────
-  if (state.kind === 'ios') {
-    return (
-      <div className="absolute bottom-28 inset-x-4 z-30 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 flex items-start gap-3">
-        {/* Icon */}
-        <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0 mt-0.5">
-          <Share2 size={17} className="text-indigo-500" strokeWidth={2.5} />
-        </div>
-
-        {/* Text */}
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-sm text-slate-800 mb-1">Install Prayer Walk</p>
-          <p className="text-xs text-slate-500 leading-snug">
-            Tap{' '}
-            <span className="inline-flex items-center gap-0.5 font-semibold text-slate-700">
-              <Share2 size={11} strokeWidth={2.5} className="inline" /> Share
-            </span>
-            {' '}then{' '}
-            <span className="font-semibold text-slate-700">Add to Home Screen</span>
-          </p>
-        </div>
-
-        {/* Dismiss */}
-        <button
-          onClick={handleDismiss}
-          className="p-1 -mr-0.5 -mt-0.5 text-slate-300 hover:text-slate-500 rounded-lg"
-          aria-label="Dismiss"
-        >
-          <X size={16} strokeWidth={2.5} />
-        </button>
-      </div>
-    );
-  }
 
   // ── Android / Chrome — native install prompt ─────────────────────────────────
   return (
