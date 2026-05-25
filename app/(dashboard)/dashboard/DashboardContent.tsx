@@ -570,6 +570,9 @@ export default function DashboardContent() {
                         const walkIdentity = w.__walkKey || getWalkIdentity(w);
                         const isActive = selectedWalkKey === walkIdentity;
 
+                        // When a walk is selected, hide ALL others — isolate it on the map
+                        if (selectedWalkKey && !isActive) return null;
+
                         const startPt = pts.length > 0
                             ? pts[0]
                             : toLatLng(w.startLocation);
@@ -579,43 +582,60 @@ export default function DashboardContent() {
 
                         if (!startPt && pts.length < 1) return null;
 
+                        const toggle = () => {
+                            if (isActive) {
+                                // Deselect — show all walks again
+                                setSelectedWalk(null);
+                                setSelectedWalkKey(null);
+                            } else {
+                                setSelectedWalk(w);
+                                setSelectedWalkKey(walkIdentity);
+                            }
+                        };
+
                         return (
                             <React.Fragment key={walkIdentity}>
                                 {pts.length > 1 && (
                                     <Polyline
                                         positions={pts.map(p => [p.lat, p.lng] as [number, number])}
                                         pathOptions={{
-                                            color: isActive ? '#2563EB' : '#94a3b8',
-                                            weight: isActive ? 6 : 2,
-                                            opacity: isActive ? 1 : 0.55,
+                                            color: '#2563EB',
+                                            weight: 6,
+                                            opacity: 1,
                                         }}
-                                        eventHandlers={{
-                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
-                                        }}
+                                        eventHandlers={{ click: toggle }}
                                     />
                                 )}
                                 {startPt && (
                                     <Marker
                                         position={[startPt.lat, startPt.lng]}
-                                        icon={isActive ? START_ICON_ACTIVE : START_ICON}
-                                        eventHandlers={{
-                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
-                                        }}
+                                        icon={START_ICON_ACTIVE}
+                                        eventHandlers={{ click: toggle }}
                                     />
                                 )}
                                 {endPt && (endPt.lat !== startPt?.lat || endPt.lng !== startPt?.lng) && (
                                     <Marker
                                         position={[endPt.lat, endPt.lng]}
-                                        icon={isActive ? END_ICON_ACTIVE : END_ICON}
-                                        eventHandlers={{
-                                            click: () => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); },
-                                        }}
+                                        icon={END_ICON_ACTIVE}
+                                        eventHandlers={{ click: toggle }}
                                     />
                                 )}
                             </React.Fragment>
                         );
                     })}
                 </MapContainer>
+
+                {/* "Show all" pill — visible when a specific walk is isolated */}
+                {selectedWalkKey && (
+                    <div className="absolute top-4 left-4 z-[500]">
+                        <button
+                            onClick={() => { setSelectedWalk(null); setSelectedWalkKey(null); }}
+                            className="flex items-center gap-2 bg-white/95 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-4 py-2.5 text-sm font-black text-slate-700 hover:text-primary hover:border-primary/30 transition-all"
+                        >
+                            ← Show all walks
+                        </button>
+                    </div>
+                )}
 
                 {/* Stats pills — bottom left */}
                 <div className="absolute bottom-8 left-4 z-[500] flex gap-1.5 flex-wrap">
@@ -712,7 +732,10 @@ export default function DashboardContent() {
                                             ? "bg-primary/[0.08] border-l-primary shadow-[inset_0_0_0_1px_rgba(37,99,235,0.18)]"
                                             : "border-l-transparent hover:bg-muted/30"
                                     )}
-                                    onClick={() => { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }}
+                                    onClick={() => {
+                                        if (isSelected) { setSelectedWalk(null); setSelectedWalkKey(null); }
+                                        else { setSelectedWalk(w); setSelectedWalkKey(walkIdentity); }
+                                    }}
                                 >
                                     <div className="flex items-start justify-between gap-2 mb-1.5">
                                         <div className="flex-1 min-w-0">

@@ -29,6 +29,7 @@ import type { SyncStatus } from '@/lib/pwa/offlineTypes';
 import type { LeafletMapHandle, LeafletMapMarker, LeafletMapPolyline } from '@/components/pwa/Map';
 import { SyncBanner } from '@/components/pwa/SyncBanner';
 import { WakeLockBanner } from '@/components/pwa/WakeLockBanner';
+import { InstallBanner } from '@/components/pwa/InstallBanner';
 
 const Map = dynamic(() => import('@/components/pwa/Map'), { ssr: false });
 
@@ -250,6 +251,18 @@ export default function MapPage() {
     setTimeout(() => mapRef.current?.fitToCoordinates(pts), 600);
   }, [walkHistory, position, activeWalk]);
 
+  // When a walk detail sheet opens, zoom the map to that walk only
+  useEffect(() => {
+    if (!detailOpen || !selectedWalk) return;
+    const pts = selectedWalk.points;
+    if (pts.length >= 2) {
+      setTimeout(() => mapRef.current?.fitToCoordinates(pts), 250);
+    } else if (pts.length === 1) {
+      setTimeout(() => mapRef.current?.centerOn(pts[0], 16), 250);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailOpen, selectedWalk?.sessionId]);
+
   // Fetch data
   useEffect(() => {
     hasFocusedHistory.current = false;
@@ -470,29 +483,41 @@ export default function MapPage() {
     ? { latitude: position.latitude, longitude: position.longitude }
     : DEFAULT_CENTER;
 
+  // When a walk detail is open, isolate that walk — hide all others
+  const focusedSessionId = detailOpen && selectedWalk ? selectedWalk.sessionId : null;
+
   const mapMarkers: LeafletMapMarker[] = [];
   if (position) {
     mapMarkers.push({ id: 'user-location', latitude: position.latitude, longitude: position.longitude, title: 'Your location', color: '#2563EB' });
   }
   if (!activeWalk) {
-    walkHistory.forEach((walk) => {
+    const historyToShow = focusedSessionId
+      ? walkHistory.filter((w) => w.sessionId === focusedSessionId)
+      : walkHistory;
+    historyToShow.forEach((walk) => {
       const pt = walk.geometryType === 'path' ? walk.points[walk.points.length - 1] : walk.points[0];
       if (!pt) return;
       mapMarkers.push({ id: `history-${walk.sessionId}`, latitude: pt.latitude, longitude: pt.longitude, title: toHistoryLabel(walk), description: `${toDurationLabel(walk.durationSeconds)} • ${toDistanceLabel(walk.distanceMeters)}`, color: walk.walkType === 'area' ? '#1C7ED6' : '#E03131' });
     });
   }
-  (locations as Record<string, unknown>[]).forEach((loc) => {
-    const coord = parseLocationCoords((loc.location as Record<string, unknown>)?.coordinates ?? loc.location);
-    if (!coord) return;
-    mapMarkers.push({ id: `location-${loc.id}`, latitude: coord.latitude, longitude: coord.longitude, title: String(loc.name), description: 'Tap to begin prayer walk', color: '#16A34A' });
-  });
+  // Hide location pins when a specific walk is in focus
+  if (!focusedSessionId) {
+    (locations as Record<string, unknown>[]).forEach((loc) => {
+      const coord = parseLocationCoords((loc.location as Record<string, unknown>)?.coordinates ?? loc.location);
+      if (!coord) return;
+      mapMarkers.push({ id: `location-${loc.id}`, latitude: coord.latitude, longitude: coord.longitude, title: String(loc.name), description: 'Tap to begin prayer walk', color: '#16A34A' });
+    });
+  }
 
   const mapPolylines: LeafletMapPolyline[] = [];
   if (activeWalk && activeRoutePoints.length >= 3) {
     mapPolylines.push({ id: 'active-route', coordinates: activeRoutePoints, color: 'rgba(16, 185, 129, 0.95)', width: 7 });
   }
   if (!activeWalk) {
-    walkHistory.filter((w) => w.geometryType === 'path' && w.points.length >= 3).forEach((walk) => {
+    const historyToShow = focusedSessionId
+      ? walkHistory.filter((w) => w.sessionId === focusedSessionId)
+      : walkHistory;
+    historyToShow.filter((w) => w.geometryType === 'path' && w.points.length >= 3).forEach((walk) => {
       const o = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
       mapPolylines.push({ id: `history-line-${walk.sessionId}`, coordinates: walk.points, color: walk.walkType === 'area' ? `rgba(38,132,255,${o})` : `rgba(255,59,48,${o})`, width: 7 });
     });
@@ -756,6 +781,9 @@ export default function MapPage() {
         </div>
       </div>
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} className="absolute inset-0 z-[39] bg-slate-900/40" />}
+
+      {/* Install prompt — Android native or iOS manual instructions */}
+      {!activeWalk && !drawerOpen && !sidebarOpen && <InstallBanner />}
 
       {/* Walk detail bottom sheet */}
       {detailOpen && selectedWalk && (
