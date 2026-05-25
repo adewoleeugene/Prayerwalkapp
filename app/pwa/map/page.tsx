@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LocateFixed, ListOrdered, X } from 'lucide-react';
+import { LocateFixed, ListOrdered, MapPin, X } from 'lucide-react';
 import { pwaApi } from '@/lib/pwa/apiClient';
 import { useWalkTimer } from '@/hooks/useWalkTimer';
 import { useGeolocation, getCurrentPosition } from '@/hooks/useGeolocation';
@@ -124,6 +124,7 @@ export default function MapPage() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatusSnapshot());
   const [error, setError] = useState<string | null>(null);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
 
   // Offline sync engine lifecycle
   useEffect(() => {
@@ -151,17 +152,39 @@ export default function MapPage() {
     } catch { /* ignore */ }
   }, []);
 
-  // Request GPS on mount
-  // navigator.permissions is undefined in Safari < 16 — guard before use.
-  // The .catch() only handles Promise rejections, NOT synchronous TypeErrors,
-  // so accessing an undefined .permissions would throw and crash the page.
+  // Request GPS on mount — show a friendly in-app prompt on first visit
+  // so the user understands WHY before the OS permission dialog appears.
   useEffect(() => {
     if (!navigator.geolocation) { setError('Geolocation not supported'); return; }
+
+    // Check if this is the first visit
+    let alreadyPrompted = false;
+    try { alreadyPrompted = !!localStorage.getItem('pwa_location_prompted'); } catch { /* Private browsing */ }
+
+    if (!alreadyPrompted) {
+      // First time — show in-app prompt before triggering the OS dialog
+      setShowLocationPrompt(true);
+      return;
+    }
+
+    // Returning visitor — start GPS directly (permission already decided)
+    // navigator.permissions is undefined in Safari < 16, guard before use
     if (!navigator.permissions) { startTracking(); return; }
     navigator.permissions.query({ name: 'geolocation' }).then((result) => {
       if (result.state !== 'denied') startTracking();
     }).catch(() => startTracking());
   }, [startTracking]);
+
+  function handleEnableLocation() {
+    try { localStorage.setItem('pwa_location_prompted', '1'); } catch { /* ignore */ }
+    setShowLocationPrompt(false);
+    startTracking();
+  }
+
+  function handleDismissLocation() {
+    try { localStorage.setItem('pwa_location_prompted', '1'); } catch { /* ignore */ }
+    setShowLocationPrompt(false);
+  }
 
   // Walk tracking loop — runs GPS when there's an active walk
   useEffect(() => {
@@ -784,6 +807,52 @@ export default function MapPage() {
 
       {/* Install prompt — Android native or iOS manual instructions */}
       {!activeWalk && !drawerOpen && !sidebarOpen && <InstallBanner />}
+
+      {/* First-time location permission prompt */}
+      {showLocationPrompt && (
+        <>
+          {/* Backdrop */}
+          <div className="absolute inset-0 z-50 bg-slate-900/50" />
+
+          {/* Bottom sheet */}
+          <div className="absolute inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-2xl px-6 pt-6 pb-10">
+            {/* Handle */}
+            <div className="flex justify-center mb-5">
+              <div className="w-10 h-1 bg-slate-200 rounded-full" />
+            </div>
+
+            {/* Icon */}
+            <div className="flex justify-center mb-5">
+              <div className="w-20 h-20 rounded-3xl bg-indigo-50 flex items-center justify-center">
+                <MapPin size={38} className="text-indigo-500" strokeWidth={1.75} />
+              </div>
+            </div>
+
+            {/* Copy */}
+            <h2 className="text-xl font-bold text-slate-800 text-center mb-3">
+              Allow Location Access
+            </h2>
+            <p className="text-sm text-slate-500 text-center leading-relaxed mb-7">
+              Prayer Walk uses your location to track your route, show nearby prayer
+              locations, and record where your team has prayed.
+            </p>
+
+            {/* CTA */}
+            <button
+              onClick={handleEnableLocation}
+              className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700 text-white font-bold text-base rounded-2xl transition-colors mb-3 shadow-md"
+            >
+              Enable Location
+            </button>
+            <button
+              onClick={handleDismissLocation}
+              className="w-full py-2 text-slate-400 font-semibold text-sm"
+            >
+              Not Now
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Walk detail bottom sheet */}
       {detailOpen && selectedWalk && (
