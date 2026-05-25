@@ -85,7 +85,7 @@ function toHistoryLabel(walk: WalkHistoryItem) {
 
 export default function MapPage() {
   const mapRef = useRef<LeafletMapHandle | null>(null);
-  const { position, startTracking, stopTracking } = useGeolocation();
+  const { position, isTracking, startTracking, stopTracking } = useGeolocation();
   const wakeLock = useWakeLock();
   const [gpsPaused, setGpsPaused] = useState(false);
 
@@ -427,7 +427,12 @@ export default function MapPage() {
   }
 
   async function confirmStartWalk() {
-    if (!position) { setError('Waiting for GPS…'); return; }
+    if (!position && !isTracking) {
+      // GPS never enabled (user tapped "Not Now" earlier) — prompt again
+      setShowLocationPrompt(true);
+      return;
+    }
+    if (!position) { setError('Waiting for GPS fix…'); return; }
     if (activeWalk) { setError('End the current walk first.'); return; }
     const branch = startBranch || sortedBranches[0] || 'International';
     const pendingInput = participantInput.trim();
