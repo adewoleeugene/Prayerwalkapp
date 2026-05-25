@@ -45,9 +45,9 @@ function makeIcon(color: string, label?: string): L.DivIcon {
 const BRANCH_ICON = makeIcon('#1e293b', '');
 const BRANCH_ICON_HOVER = makeIcon('#2563EB', '');
 const START_ICON = makeIcon('#3b82f6', 'S');
-const START_ICON_ACTIVE = makeIcon('#16a34a', 'S');
+const START_ICON_ACTIVE = makeIcon('#1C7ED6', 'S');
 const END_ICON = makeIcon('#7c3aed', 'E');
-const END_ICON_ACTIVE = makeIcon('#dc2626', 'E');
+const END_ICON_ACTIVE = makeIcon('#1C7ED6', 'E');
 
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
@@ -648,7 +648,7 @@ export default function DashboardContent() {
                                     <Polyline
                                         positions={pts.map(p => [p.lat, p.lng] as [number, number])}
                                         pathOptions={{
-                                            color: '#2563EB',
+                                            color: '#EAB308',
                                             weight: 6,
                                             opacity: 1,
                                         }}
