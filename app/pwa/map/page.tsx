@@ -151,8 +151,12 @@ export default function MapPage() {
   }, []);
 
   // Request GPS on mount
+  // navigator.permissions is undefined in Safari < 16 — guard before use.
+  // The .catch() only handles Promise rejections, NOT synchronous TypeErrors,
+  // so accessing an undefined .permissions would throw and crash the page.
   useEffect(() => {
     if (!navigator.geolocation) { setError('Geolocation not supported'); return; }
+    if (!navigator.permissions) { startTracking(); return; }
     navigator.permissions.query({ name: 'geolocation' }).then((result) => {
       if (result.state !== 'denied') startTracking();
     }).catch(() => startTracking());
@@ -220,7 +224,8 @@ export default function MapPage() {
     onHidden: () => {
       if (!activeWalk) return;
       setGpsPaused(true);
-      if (Notification.permission === 'granted') {
+      // Notification is undefined on iOS Safari (non-PWA) — guard before use
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification('Walk paused', {
           body: 'Tap to resume GPS tracking',
           icon: '/icons/icon-192.png',
@@ -272,8 +277,9 @@ export default function MapPage() {
   }, [position?.latitude, position?.longitude]);
 
   // Request notification permission when walk starts
+  // Notification is undefined on iOS Safari (non-PWA mode) — guard before use
   useEffect(() => {
-    if (activeWalk && Notification.permission === 'default') {
+    if (activeWalk && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       void Notification.requestPermission();
     }
   }, [activeWalk]);
