@@ -88,6 +88,11 @@ export default function MapPage() {
   const wakeLock = useWakeLock();
   const [gpsPaused, setGpsPaused] = useState(false);
 
+  // Track where the map was last centered — used to debounce auto-panning during walks
+  const lastCenterRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  // Track where we last fetched nearby data — avoid hammering API on GPS drift
+  const lastFetchPosRef = useRef<{ latitude: number; longitude: number } | null>(null);
+
   const [locations, setLocations] = useState<unknown[]>([]);
   const [walkHistory, setWalkHistory] = useState<WalkHistoryItem[]>([]);
   const [daysFilter, setDaysFilter] = useState<1 | 7 | 30>(7);
@@ -155,12 +160,14 @@ export default function MapPage() {
 
   // Walk tracking loop — runs GPS when there's an active walk
   useEffect(() => {
-    if (!activeWalk) { stopTracking(); setActiveRoutePoints([]); return; }
+    if (!activeWalk) { stopTracking(); setActiveRoutePoints([]); lastCenterRef.current = null; return; }
     startTracking();
 
     if (position) {
-      setActiveRoutePoints([{ latitude: position.latitude, longitude: position.longitude }]);
-      mapRef.current?.centerOn({ latitude: position.latitude, longitude: position.longitude }, 17);
+      const startPt = { latitude: position.latitude, longitude: position.longitude };
+      setActiveRoutePoints([startPt]);
+      lastCenterRef.current = startPt;
+      mapRef.current?.centerOn(startPt, 17);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalk?.sessionId]);
@@ -168,14 +175,29 @@ export default function MapPage() {
   // Track GPS points during active walk
   useEffect(() => {
     if (!activeWalk || !position) return;
+
+    // Skip low-accuracy fixes — Android drift with 40–80 m accuracy still causes
+    // the route to grow and the map to pan while the user is standing still.
+    if (position.accuracy > 35) return;
+
     const nextPoint = { latitude: position.latitude, longitude: position.longitude };
+
     setActiveRoutePoints((prev) => {
       if (prev.length === 0) return [nextPoint];
       const last = prev[prev.length - 1];
-      if (calculateDistanceMeters(last, nextPoint) < 2) return prev;
+      // 8 m threshold — Android can drift 3–6 m standing still with a good fix
+      if (calculateDistanceMeters(last, nextPoint) < 8) return prev;
       return [...prev, nextPoint];
     });
-    mapRef.current?.centerOn({ latitude: position.latitude, longitude: position.longitude });
+
+    // Only pan the map when the user has actually moved > 15 m from the last
+    // center point — prevents the map from jumping on every GPS tick
+    const lastCenter = lastCenterRef.current;
+    if (!lastCenter || calculateDistanceMeters(lastCenter, nextPoint) > 15) {
+      lastCenterRef.current = nextPoint;
+      mapRef.current?.centerOn(nextPoint);
+    }
+
     void trackWalkOnlineOrQueue({
       sessionId: activeWalk.sessionId,
       latitude: position.latitude,
@@ -237,10 +259,15 @@ export default function MapPage() {
   }, [daysFilter]);
 
   useEffect(() => {
-    if (position) {
-      void fetchBranches(position.latitude, position.longitude);
-      void fetchNearbyLocations(position.latitude, position.longitude);
-    }
+    if (!position) return;
+    const newPos = { latitude: position.latitude, longitude: position.longitude };
+    const lastFetch = lastFetchPosRef.current;
+    // Only re-fetch when we've moved at least 150 m — prevents hammering the API
+    // on GPS drift (which can report ±10 m changes while standing still)
+    if (lastFetch && calculateDistanceMeters(lastFetch, newPos) < 150) return;
+    lastFetchPosRef.current = newPos;
+    void fetchBranches(position.latitude, position.longitude);
+    void fetchNearbyLocations(position.latitude, position.longitude);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position?.latitude, position?.longitude]);
 

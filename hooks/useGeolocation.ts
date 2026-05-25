@@ -45,6 +45,9 @@ export function useGeolocation(): GeolocationHook {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        // Ignore very low-accuracy readings — common on Android during initial
+        // GPS acquisition or indoors. These cause spurious map movement.
+        if (pos.coords.accuracy > 80) return;
         setPosition({
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
