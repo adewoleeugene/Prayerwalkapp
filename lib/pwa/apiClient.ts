@@ -83,11 +83,12 @@ export const pwaApi = {
         deviceFingerprint: ensureFingerprint(),
         ...meta,
       }),
-    history: (limit = 80, options?: { branch?: string; days?: number; allTime?: boolean }) =>
+    history: (limit = 80, options?: { branch?: string; days?: number; allTime?: boolean; showAreaWalks?: boolean }) =>
       pwaClient.get('/walks/history', {
         limit,
         branch: options?.branch,
         ...(options?.allTime ? { allTime: 'true' } : { days: options?.days ?? 14 }),
+        ...(options?.showAreaWalks ? { showAreaWalks: 'true' } : {}),
         walkType: 'all',
         includeActive: 1,
       }),

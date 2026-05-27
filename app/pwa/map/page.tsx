@@ -430,7 +430,7 @@ export default function MapPage() {
 
   async function fetchAllMapWalks() {
     try {
-      const res = await pwaApi.walks.history(2000, { allTime: true });
+      const res = await pwaApi.walks.history(2000, { allTime: true, showAreaWalks: true });
       const data = res.data as Record<string, unknown>;
       const rows = (Array.isArray(data?.routes) ? data.routes : []) as Record<string, unknown>[];
       setAllMapWalks(mapWalkRows(rows));

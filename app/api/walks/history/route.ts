@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     const toParam = (searchParams.get('to') || '').trim();
     const allTimeSearch = searchParams.get('allTimeSearch') === 'true';
     const allTime = searchParams.get('allTime') === 'true';
+    const showAreaWalks = searchParams.get('showAreaWalks') === 'true';
     const limitRaw = Number(searchParams.get('limit') || 50);
     const hasAdvancedFilter = hasSearch || hasLocationQuery || !!fromParam || !!toParam;
 
@@ -106,7 +107,8 @@ export async function GET(request: NextRequest) {
     }
 
     const deviceFingerprint = (request.headers.get('x-device-fingerprint') || '').trim();
-    const isAnonymousUser = role === 'user' && deviceFingerprint.length >= 4;
+    // showAreaWalks=true: authenticated user wants collective map view — skip device-scoped filter
+    const isAnonymousUser = role === 'user' && deviceFingerprint.length >= 4 && !showAreaWalks;
 
     const baseWhere: any = {
       status: { in: statusFilter as any },
