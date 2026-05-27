@@ -55,6 +55,8 @@ const pwaClient = {
     request<T>('GET', path, undefined, params),
   post: <T = unknown>(path: string, body?: unknown) =>
     request<T>('POST', path, body),
+  delete: <T = unknown>(path: string, body?: unknown) =>
+    request<T>('DELETE', path, body),
 };
 
 export const pwaApi = {
@@ -109,6 +111,8 @@ export const pwaApi = {
       meta?: { clientRequestId?: string; clientEventAt?: string; localSessionId?: string }
     ) =>
       pwaClient.post('/walks/complete', { sessionId, locationId, latitude, longitude, prayerSummary, prayerJournal, ...meta }),
+    delete: (sessionId: string) =>
+      pwaClient.delete('/walks', { sessionId }),
   },
 };
 

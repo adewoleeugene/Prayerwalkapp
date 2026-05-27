@@ -126,6 +126,8 @@ export default function MapPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatusSnapshot());
   const [error, setError] = useState<string | null>(null);
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [confirmDeleteWalk, setConfirmDeleteWalk] = useState(false);
+  const [isDeletingWalk, setIsDeletingWalk] = useState(false);
 
   // Offline sync engine lifecycle
   useEffect(() => {
@@ -526,6 +528,24 @@ export default function MapPage() {
     }
   }
 
+  async function deleteWalk() {
+    if (!selectedWalk || isDeletingWalk) return;
+    setIsDeletingWalk(true);
+    try {
+      await pwaApi.walks.delete(selectedWalk.sessionId);
+      setWalkHistory(prev => prev.filter(w => w.sessionId !== selectedWalk.sessionId));
+      setAllMapWalks(prev => prev.filter(w => w.sessionId !== selectedWalk.sessionId));
+      setConfirmDeleteWalk(false);
+      setDetailOpen(false);
+      setSelectedWalk(null);
+    } catch (e: unknown) {
+      setError((e as Error)?.message ?? 'Failed to delete walk');
+      setConfirmDeleteWalk(false);
+    } finally {
+      setIsDeletingWalk(false);
+    }
+  }
+
   // Build map layers
   const center = position
     ? { latitude: position.latitude, longitude: position.longitude }
@@ -796,6 +816,13 @@ export default function MapPage() {
                 {isEndingWalk ? 'Submitting…' : 'Submit'}
               </button>
             </div>
+            <button
+              onClick={() => setEndWalkOpen(false)}
+              disabled={isEndingWalk}
+              className="w-full mt-3 py-2.5 text-sm font-semibold text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40"
+            >
+              ← Keep Walking
+            </button>
           </div>
         </div>
       )}
@@ -888,7 +915,7 @@ export default function MapPage() {
       {/* Walk detail bottom sheet */}
       {detailOpen && selectedWalk && (
         <>
-          <div onClick={() => setDetailOpen(false)} className="absolute inset-0 z-40 bg-black/40" />
+          <div onClick={() => { setDetailOpen(false); setConfirmDeleteWalk(false); }} className="absolute inset-0 z-40 bg-black/40" />
           <div className="absolute inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl px-5 pt-3 pb-8 max-h-[70vh] overflow-y-auto">
             <div className="flex justify-center mb-3"><div className="w-10 h-1.5 bg-slate-200 rounded-full" /></div>
             <h2 className="text-xl font-bold text-slate-800 mb-2">{toHistoryLabel(selectedWalk)}</h2>
@@ -907,7 +934,35 @@ export default function MapPage() {
                 <div className="text-sm text-slate-800 leading-relaxed">{selectedWalk.prayerJournal}</div>
               </div>
             )}
-            <button onClick={() => setDetailOpen(false)} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl mt-2">Close</button>
+            <div className="flex gap-3 mt-2">
+              <button onClick={() => setDetailOpen(false)} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl">Close</button>
+              <button
+                onClick={() => setConfirmDeleteWalk(true)}
+                className="px-4 py-3 bg-red-50 text-red-500 font-bold rounded-xl border border-red-100 hover:bg-red-100 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+            {confirmDeleteWalk && (
+              <div className="mt-3 bg-red-50 border border-red-100 rounded-xl p-4">
+                <p className="text-sm font-semibold text-red-700 mb-3 text-center">Delete this walk? This cannot be undone.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDeleteWalk(false)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 bg-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => void deleteWalk()}
+                    disabled={isDeletingWalk}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-500 text-white disabled:opacity-60"
+                  >
+                    {isDeletingWalk ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
