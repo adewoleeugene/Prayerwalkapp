@@ -96,6 +96,7 @@ export default function MapPage() {
 
   const [locations, setLocations] = useState<unknown[]>([]);
   const [walkHistory, setWalkHistory] = useState<WalkHistoryItem[]>([]);
+  const [allMapWalks, setAllMapWalks] = useState<WalkHistoryItem[]>([]);
   const [daysFilter, setDaysFilter] = useState<1 | 7 | 30>(7);
   const hasFocusedHistory = useRef(false);
 
@@ -286,6 +287,12 @@ export default function MapPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailOpen, selectedWalk?.sessionId]);
 
+  // Fetch all walks for the map once on mount (not tied to daysFilter)
+  useEffect(() => {
+    void fetchAllMapWalks();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Fetch data
   useEffect(() => {
     hasFocusedHistory.current = false;
@@ -390,32 +397,43 @@ export default function MapPage() {
     } catch { /* ignore */ }
   }
 
+  function mapWalkRows(rows: Record<string, unknown>[]): WalkHistoryItem[] {
+    return rows.map((item) => ({
+      sessionId: String(item.sessionId),
+      branch: String(item.branch || 'Unknown'),
+      status: (['active', 'abandoned'].includes(String(item.status)) ? item.status : 'completed') as WalkHistoryItem['status'],
+      startedAt: String(item.startedAt || new Date().toISOString()),
+      endedAt: item.endedAt ? String(item.endedAt) : null,
+      durationSeconds: Number(item.durationSeconds || 0),
+      distanceMeters: Number(item.distanceMeters || 0),
+      startLocationName: item.startLocationName ? String(item.startLocationName) : null,
+      endLocationName: item.endLocationName ? String(item.endLocationName) : null,
+      prayerSummary: item.prayerSummary ? String(item.prayerSummary) : null,
+      prayerJournal: item.prayerJournal ? String(item.prayerJournal) : null,
+      walkType: (item.walkType === 'area' ? 'area' : 'path') as WalkHistoryItem['walkType'],
+      geometryType: (item.geometryType === 'spot' ? 'spot' : 'path') as WalkHistoryItem['geometryType'],
+      opacity: Number(item.opacity ?? 0.5),
+      points: (Array.isArray(item.points) ? item.points : [])
+        .map((p) => parseLocationCoords(p as unknown))
+        .filter((p) => p !== null) as Array<{ latitude: number; longitude: number }>,
+    })).filter((w) => w.points.length > 0);
+  }
+
   async function fetchWalkHistory() {
     try {
       const res = await pwaApi.walks.history(300, { days: daysFilter });
       const data = res.data as Record<string, unknown>;
       const rows = (Array.isArray(data?.routes) ? data.routes : []) as Record<string, unknown>[];
-      setWalkHistory(
-        rows.map((item) => ({
-          sessionId: String(item.sessionId),
-          branch: String(item.branch || 'Unknown'),
-          status: (['active', 'abandoned'].includes(String(item.status)) ? item.status : 'completed') as WalkHistoryItem['status'],
-          startedAt: String(item.startedAt || new Date().toISOString()),
-          endedAt: item.endedAt ? String(item.endedAt) : null,
-          durationSeconds: Number(item.durationSeconds || 0),
-          distanceMeters: Number(item.distanceMeters || 0),
-          startLocationName: item.startLocationName ? String(item.startLocationName) : null,
-          endLocationName: item.endLocationName ? String(item.endLocationName) : null,
-          prayerSummary: item.prayerSummary ? String(item.prayerSummary) : null,
-          prayerJournal: item.prayerJournal ? String(item.prayerJournal) : null,
-          walkType: (item.walkType === 'area' ? 'area' : 'path') as WalkHistoryItem['walkType'],
-          geometryType: (item.geometryType === 'spot' ? 'spot' : 'path') as WalkHistoryItem['geometryType'],
-          opacity: Number(item.opacity ?? 0.5),
-          points: (Array.isArray(item.points) ? item.points : [])
-            .map((p) => parseLocationCoords(p as unknown))
-            .filter((p) => p !== null) as Array<{ latitude: number; longitude: number }>,
-        })).filter((w) => w.points.length > 0)
-      );
+      setWalkHistory(mapWalkRows(rows));
+    } catch { /* ignore */ }
+  }
+
+  async function fetchAllMapWalks() {
+    try {
+      const res = await pwaApi.walks.history(2000, { allTime: true });
+      const data = res.data as Record<string, unknown>;
+      const rows = (Array.isArray(data?.routes) ? data.routes : []) as Record<string, unknown>[];
+      setAllMapWalks(mapWalkRows(rows));
     } catch { /* ignore */ }
   }
 
@@ -461,6 +479,7 @@ export default function MapPage() {
         setActiveWalk(next);
         localStorage.setItem(ACTIVE_WALK_CACHE_KEY, JSON.stringify(next));
         void fetchWalkHistory();
+        void fetchAllMapWalks();
       } else {
         setError(String((data as Record<string, unknown>)?.error || 'Could not start walk'));
       }
@@ -495,6 +514,7 @@ export default function MapPage() {
       localStorage.removeItem(ACTIVE_WALK_CACHE_KEY);
       stopTracking();
       void fetchWalkHistory();
+      void fetchAllMapWalks();
     } catch (e: unknown) {
       const err = e as Record<string, unknown>;
       setError(String(
@@ -520,8 +540,8 @@ export default function MapPage() {
   }
   if (!activeWalk) {
     const historyToShow = focusedSessionId
-      ? walkHistory.filter((w) => w.sessionId === focusedSessionId)
-      : walkHistory;
+      ? allMapWalks.filter((w) => w.sessionId === focusedSessionId)
+      : allMapWalks;
     historyToShow.forEach((walk) => {
       const pt = walk.geometryType === 'path' ? walk.points[walk.points.length - 1] : walk.points[0];
       if (!pt) return;
@@ -543,8 +563,8 @@ export default function MapPage() {
   }
   if (!activeWalk) {
     const historyToShow = focusedSessionId
-      ? walkHistory.filter((w) => w.sessionId === focusedSessionId)
-      : walkHistory;
+      ? allMapWalks.filter((w) => w.sessionId === focusedSessionId)
+      : allMapWalks;
     historyToShow.filter((w) => w.geometryType === 'path' && w.points.length >= 3).forEach((walk) => {
       const o = Math.max(0.18, Math.min(1, walk.opacity || 0.5));
       mapPolylines.push({ id: `history-line-${walk.sessionId}`, coordinates: walk.points, color: `rgba(234, 179, 8, ${o})`, width: 7 });
